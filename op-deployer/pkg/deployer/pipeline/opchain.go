@@ -58,6 +58,7 @@ func DeployOPChain(env *Env, intent *state.Intent, st *state.State, chainID comm
 
 	st.ImplementationsDeployment.DelayedWETHImplAddress = impls.DelayedWETH
 	st.ImplementationsDeployment.OptimismPortalImplAddress = impls.OptimismPortal
+	st.ImplementationsDeployment.ETHLockboxImplAddress = impls.ETHLockbox
 	st.ImplementationsDeployment.SystemConfigImplAddress = impls.SystemConfig
 	st.ImplementationsDeployment.L1CrossDomainMessengerImplAddress = impls.L1CrossDomainMessenger
 	st.ImplementationsDeployment.L1ERC721BridgeImplAddress = impls.L1ERC721Bridge
@@ -73,12 +74,13 @@ func DeployOPChain(env *Env, intent *state.Intent, st *state.State, chainID comm
 func makeDCI(intent *state.Intent, thisIntent *state.ChainIntent, chainID common.Hash, st *state.State) (opcm.DeployOPChainInput, error) {
 	proofParams, err := jsonutil.MergeJSON(
 		state.ChainProofParams{
-			DisputeGameType:         standard.DisputeGameType,
-			DisputeAbsolutePrestate: standard.DisputeAbsolutePrestate,
-			DisputeMaxGameDepth:     standard.DisputeMaxGameDepth,
-			DisputeSplitDepth:       standard.DisputeSplitDepth,
-			DisputeClockExtension:   standard.DisputeClockExtension,
-			DisputeMaxClockDuration: standard.DisputeMaxClockDuration,
+			DisputeGameUsesSuperRoots: standard.DisputeGameUsesSuperRoots,
+			DisputeGameType:           standard.DisputeGameType,
+			DisputeAbsolutePrestate:   standard.DisputeAbsolutePrestate,
+			DisputeMaxGameDepth:       standard.DisputeMaxGameDepth,
+			DisputeSplitDepth:         standard.DisputeSplitDepth,
+			DisputeClockExtension:     standard.DisputeClockExtension,
+			DisputeMaxClockDuration:   standard.DisputeMaxClockDuration,
 		},
 		intent.GlobalDeployOverrides,
 		thisIntent.DeployOverrides,
@@ -100,6 +102,7 @@ func makeDCI(intent *state.Intent, thisIntent *state.ChainIntent, chainID common
 		Opcm:                         st.ImplementationsDeployment.OpcmAddress,
 		SaltMixer:                    st.Create2Salt.String(), // passing through salt generated at state initialization
 		GasLimit:                     standard.GasLimit,
+		DisputeGameUsesSuperRoots:    proofParams.DisputeGameUsesSuperRoots,
 		DisputeGameType:              proofParams.DisputeGameType,
 		DisputeAbsolutePrestate:      proofParams.DisputeAbsolutePrestate,
 		DisputeMaxGameDepth:          proofParams.DisputeMaxGameDepth,
@@ -123,6 +126,7 @@ func makeChainState(chainID common.Hash, dco opcm.DeployOPChainOutput) *state.Ch
 		L1StandardBridgeProxyAddress:              dco.L1StandardBridgeProxy,
 		L1CrossDomainMessengerProxyAddress:        dco.L1CrossDomainMessengerProxy,
 		OptimismPortalProxyAddress:                dco.OptimismPortalProxy,
+		ETHLockboxProxyAddress:                    dco.ETHLockboxProxy,
 		DisputeGameFactoryProxyAddress:            dco.DisputeGameFactoryProxy,
 		AnchorStateRegistryProxyAddress:           dco.AnchorStateRegistryProxy,
 		FaultDisputeGameAddress:                   dco.FaultDisputeGame,

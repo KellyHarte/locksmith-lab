@@ -33,6 +33,7 @@ type DeployOPChainInput struct {
 	SaltMixer         string
 	GasLimit          uint64
 
+	DisputeGameUsesSuperRoots    bool
 	DisputeGameType              uint32
 	DisputeAbsolutePrestate      common.Hash
 	DisputeMaxGameDepth          uint64
@@ -63,6 +64,7 @@ type DeployOPChainOutput struct {
 	L1CrossDomainMessengerProxy       common.Address
 	// Fault proof contracts below.
 	OptimismPortalProxy                common.Address
+	ETHLockboxProxy                    common.Address `evm:"ethLockboxProxy"`
 	DisputeGameFactoryProxy            common.Address
 	AnchorStateRegistryProxy           common.Address
 	FaultDisputeGame                   common.Address
@@ -92,6 +94,7 @@ type ReadImplementationAddressesInput struct {
 type ReadImplementationAddressesOutput struct {
 	DelayedWETH                  common.Address
 	OptimismPortal               common.Address
+	ETHLockbox                   common.Address `evm:"ethLockbox"`
 	SystemConfig                 common.Address
 	L1CrossDomainMessenger       common.Address
 	L1ERC721Bridge               common.Address
