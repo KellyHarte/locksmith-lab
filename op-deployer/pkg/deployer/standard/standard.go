@@ -227,7 +227,7 @@ func DefaultHardforkScheduleForTag(tag string) *genesis.UpgradeScheduleDeployCon
 	switch tag {
 	case ContractsV160Tag, ContractsV170Beta1L2Tag:
 		return sched
-	case ContractsV180Tag, ContractsV200Tag:
+	case ContractsV180Tag, ContractsV200Tag, ContractsV300Tag:
 		sched.ActivateForkAtGenesis(rollup.Holocene)
 	default:
 		sched.ActivateForkAtGenesis(rollup.Holocene)
