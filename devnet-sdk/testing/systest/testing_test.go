@@ -128,10 +128,6 @@ func (m *mockInteropSet) L2s() []system.Chain { return []system.Chain{&mockChain
 // mockSupervisor implements the system.Supervisor interface for testing
 type mockSupervisor struct{}
 
-func (m *mockSupervisor) CheckMessage(ctx context.Context, id supervisorTypes.Identifier, hash common.Hash, desc supervisorTypes.ExecutingDescriptor) (supervisorTypes.SafetyLevel, error) {
-	return supervisorTypes.Invalid, nil
-}
-
 func (m *mockSupervisor) LocalUnsafe(ctx context.Context, chainID eth.ChainID) (eth.BlockID, error) {
 	return eth.BlockID{}, nil
 }

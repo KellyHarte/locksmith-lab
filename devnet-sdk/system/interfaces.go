@@ -135,7 +135,6 @@ type InteropSet interface {
 
 // Supervisor provides access to the query interface of the supervisor
 type Supervisor interface {
-	CheckMessage(context.Context, supervisorTypes.Identifier, common.Hash, supervisorTypes.ExecutingDescriptor) (supervisorTypes.SafetyLevel, error)
 	LocalUnsafe(context.Context, eth.ChainID) (eth.BlockID, error)
 	CrossSafe(context.Context, eth.ChainID) (supervisorTypes.DerivedIDPair, error)
 	Finalized(context.Context, eth.ChainID) (eth.BlockID, error)
