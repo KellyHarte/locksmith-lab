@@ -1983,6 +1983,8 @@ workflows:
     jobs:
       - contracts-bedrock-build:
           build_args: --deny-warnings --skip test
+          context:
+            - circleci-repo-readonly-authenticated-github-token
       - cannon-go-lint-and-test:
           name: cannon-go-lint-and-test-<<matrix.mips_word_size>>-bit
           requires:
@@ -2024,6 +2026,7 @@ workflows:
           context:
             - oplabs-gcr
             - slack
+            - circleci-repo-readonly-authenticated-github-token
       - check-cross-platform:
           matrix:
             parameters:
