@@ -27,9 +27,8 @@ func Test_ProgramAction_OperatorFeeConstistency(gt *testing.T) {
 		IsthmusTransitionBlock
 	)
 
-	const testOperatorFeeScalar = uint32(20000)
+	const testOperatorFeeScalar = uint32(100e6)
 	const testOperatorFeeConstant = uint64(500)
-	const testDepositValue = uint64(10000)
 	testStorageUpdateContractAddress := common.HexToAddress("0xffffffff")
 	// contract TestSetter {
 	//   uint x;
@@ -156,12 +155,10 @@ func Test_ProgramAction_OperatorFeeConstistency(gt *testing.T) {
 		case DepositTx:
 			aliceInitialBalance, l1FeeVaultInitialBalance, baseFeeVaultInitialBalance, sequencerFeeVaultInitialBalance, operatorFeeVaultInitialBalance = getCurrentBalances()
 
-			bobInitialBalance := balanceAt(env.Bob.Address())
-
 			// regular Deposit, in new L1 block
 			env.Alice.L1.ActResetTxOpts(t)
 			env.Alice.L2.ActSetTxToAddr(&env.Dp.Addresses.Bob)(t)
-			env.Alice.L2.ActSetTxValue(new(big.Int).SetUint64(testDepositValue))(t)
+			env.Alice.L2.ActSetTxGasLimit(2e6)(t)
 			env.Alice.ActDeposit(t)
 			env.Miner.ActL1StartBlock(12)(t)
 			env.Miner.ActL1IncludeTx(env.Alice.Address())(t)
@@ -172,10 +169,6 @@ func Test_ProgramAction_OperatorFeeConstistency(gt *testing.T) {
 			env.Sequencer.ActBuildToL1HeadUnsafe(t)
 
 			env.Alice.ActCheckDepositStatus(true, true)(t)
-
-			bobFinalBalance := balanceAt(env.Bob.Address())
-
-			require.Equal(t, bobInitialBalance.Uint64()+testDepositValue, bobFinalBalance.Uint64())
 
 			receipt, err = env.Alice.GetLastDepositL2Receipt(t)
 			require.NoError(t, err)
@@ -213,7 +206,12 @@ func Test_ProgramAction_OperatorFeeConstistency(gt *testing.T) {
 				new(big.Int).Sub(operatorFeeVaultFinalBalance, operatorFeeVaultInitialBalance),
 			)
 		}
-		require.True(t, aliceFinalBalance.Cmp(aliceInitialBalance) < 0, "Alice's balance should decrease")
+
+		if testCfg.Custom == DepositTx {
+			require.Equal(t, aliceInitialBalance, aliceFinalBalance, "Alice's balance shouldn't have changed")
+		} else {
+			require.True(t, aliceFinalBalance.Cmp(aliceInitialBalance) < 0, "Alice's balance should decrease")
+		}
 
 		// Check that no Ether has been minted or burned
 		finalTotalBalance := new(big.Int).Add(
@@ -230,12 +228,7 @@ func Test_ProgramAction_OperatorFeeConstistency(gt *testing.T) {
 			),
 		)
 
-		if testCfg.Custom == DepositTx {
-			// Minus the deposit value that was sent to Bob
-			require.Equal(t, aliceInitialBalance.Uint64()-testDepositValue, finalTotalBalance.Uint64())
-		} else {
-			require.Equal(t, aliceInitialBalance, finalTotalBalance)
-		}
+		require.Equal(t, aliceInitialBalance, finalTotalBalance)
 
 		l2UnsafeHead := env.Engine.L2Chain().CurrentHeader()
 

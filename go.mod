@@ -6,6 +6,7 @@ toolchain go1.22.7
 
 require (
 	github.com/BurntSushi/toml v1.4.0
+	github.com/Masterminds/semver/v3 v3.1.1
 	github.com/andybalholm/brotli v1.1.0
 	github.com/bmatcuk/doublestar/v4 v4.8.1
 	github.com/btcsuite/btcd v0.24.2
@@ -63,7 +64,6 @@ require (
 
 require (
 	github.com/DataDog/zstd v1.5.6-0.20230824185856-869dae002e5e // indirect
-	github.com/Masterminds/semver/v3 v3.1.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/VictoriaMetrics/fastcache v1.12.2 // indirect
 	github.com/adrg/xdg v0.4.0 // indirect
@@ -274,7 +274,7 @@ require (
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
 
-replace github.com/ethereum/go-ethereum => github.com/ethereum-optimism/op-geth v1.101503.2-rc.1
+replace github.com/ethereum/go-ethereum => github.com/ethereum-optimism/op-geth v1.101503.2-rc.2
 
 //replace github.com/ethereum/go-ethereum => ../op-geth
 
