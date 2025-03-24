@@ -6,6 +6,7 @@ import (
 	"path"
 	"time"
 
+	"github.com/ethereum-optimism/optimism/op-e2e/config/secrets"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -36,9 +37,9 @@ func WriteDefaultJWT(t TestingBase) string {
 // DeployParams bundles the deployment parameters to generate further testing inputs with.
 type DeployParams struct {
 	DeployConfig   *genesis.DeployConfig
-	MnemonicConfig *MnemonicConfig
-	Secrets        *Secrets
-	Addresses      *Addresses
+	MnemonicConfig *secrets.MnemonicConfig
+	Secrets        *secrets.Secrets
+	Addresses      *secrets.Addresses
 	AllocType      config.AllocType
 }
 
@@ -53,9 +54,8 @@ type TestParams struct {
 }
 
 func MakeDeployParams(t require.TestingT, tp *TestParams) *DeployParams {
-	mnemonicCfg := DefaultMnemonicConfig
-	secrets, err := mnemonicCfg.Secrets()
-	require.NoError(t, err)
+	mnemonicCfg := secrets.DefaultMnemonicConfig
+	secrets := secrets.DefaultSecrets
 	addresses := secrets.Addresses()
 
 	deployConfig := config.DeployConfig(tp.AllocType)

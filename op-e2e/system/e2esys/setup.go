@@ -48,6 +48,7 @@ import (
 	batcherFlags "github.com/ethereum-optimism/optimism/op-batcher/flags"
 	"github.com/ethereum-optimism/optimism/op-chain-ops/genesis"
 	"github.com/ethereum-optimism/optimism/op-e2e/config"
+	"github.com/ethereum-optimism/optimism/op-e2e/config/secrets"
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils"
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/batcher"
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/fakebeacon"
@@ -107,8 +108,7 @@ func DefaultSystemConfig(t testing.TB, opts ...SystemConfigOpt) SystemConfig {
 		opt(sco)
 	}
 
-	secrets, err := e2eutils.DefaultMnemonicConfig.Secrets()
-	require.NoError(t, err)
+	secrets := secrets.DefaultSecrets
 	deployConfig := config.DeployConfig(sco.AllocType)
 	deployConfig.L1GenesisBlockTimestamp = hexutil.Uint64(time.Now().Unix())
 	e2eutils.ApplyDeployConfigForks(deployConfig)
@@ -263,7 +263,7 @@ type DepositContractConfig struct {
 }
 
 type SystemConfig struct {
-	Secrets                *e2eutils.Secrets
+	Secrets                *secrets.Secrets
 	L1InfoPredeployAddress common.Address
 
 	DeployConfig  *genesis.DeployConfig
