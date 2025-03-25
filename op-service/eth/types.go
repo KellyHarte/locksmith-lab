@@ -380,6 +380,7 @@ func BlockAsPayload(bl *types.Block, config *params.ChainConfig) (*ExecutionPayl
 		Transactions:  opaqueTxs,
 		ExcessBlobGas: (*Uint64Quantity)(bl.ExcessBlobGas()),
 		BlobGasUsed:   (*Uint64Quantity)(bl.BlobGasUsed()),
+		// WithdrawalsRoot is only set starting at Isthmus
 	}
 
 	if config.ShanghaiTime != nil && uint64(payload.Timestamp) >= *config.ShanghaiTime {
