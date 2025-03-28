@@ -54,7 +54,8 @@ func withdrawalRootTestScenario(chainIdx uint64, walletGetter validators.WalletG
 
 		user := walletGetter(ctx)
 
-		// Sad eth clients
+		defer systest.RequireNoChainFork(t, chain, logger)()
+
 		rpcCl, err := client.NewRPC(ctx, logger, chain.Nodes()[0].RPCURL())
 		require.NoError(t, err)
 		t.Cleanup(rpcCl.Close)
