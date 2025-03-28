@@ -288,14 +288,15 @@ func execMsgDifferEventIndexInSingleTx(
 type invalidAttributeType string
 
 const (
-	randomOrigin        invalidAttributeType = "randomOrigin"
-	randomBlockNumber   invalidAttributeType = "randomBlockNumber"
-	randomLogIndex      invalidAttributeType = "randomLogIndex"
-	randomTimestamp     invalidAttributeType = "randomTimestamp"
-	randomChainID       invalidAttributeType = "randomChainID"
-	mismatchedLogIndex  invalidAttributeType = "mismatchedLogIndex"
-	mismatchedTimestamp invalidAttributeType = "mismatchedTimestamp"
-	msgNotPresent       invalidAttributeType = "msgNotPresent"
+	randomOrigin                     invalidAttributeType = "randomOrigin"
+	randomBlockNumber                invalidAttributeType = "randomBlockNumber"
+	randomLogIndex                   invalidAttributeType = "randomLogIndex"
+	randomTimestamp                  invalidAttributeType = "randomTimestamp"
+	randomChainID                    invalidAttributeType = "randomChainID"
+	mismatchedLogIndex               invalidAttributeType = "mismatchedLogIndex"
+	mismatchedTimestamp              invalidAttributeType = "mismatchedTimestamp"
+	msgNotPresent                    invalidAttributeType = "msgNotPresent"
+	logIndexGreaterOrEqualToEventCnt invalidAttributeType = "logIndexGreaterOrEqualToEventCnt"
 )
 
 // executeIndexedFault builds on top of txintent.ExecuteIndexed to inject a fault for the identifier of message
@@ -329,7 +330,7 @@ func executeIndexedFault(
 			case randomChainID:
 				newMsg.Identifier.ChainID = eth.ChainIDFromBytes32([32]byte(testutils.RandomData(rng, 32)))
 			case mismatchedLogIndex:
-				// valid msg within block, but mismatchging event index
+				// valid msg within block, but mismatching event index
 				newMsg.Identifier.LogIndex += 1
 			case mismatchedTimestamp:
 				// within time window, but mismatching block
@@ -339,6 +340,11 @@ func executeIndexedFault(
 				// use destination chain ID because initiating message is not present in dest chain
 				destChainID := sys.L2s()[1].ID().Uint64()
 				newMsg.Identifier.ChainID = eth.ChainID{destChainID}
+			case logIndexGreaterOrEqualToEventCnt:
+				// execute implied-conflict message: point to event-index >= number of logs
+				// number of logs == number of entries
+				// so set the invalid logindex to number of entries
+				newMsg.Identifier.LogIndex = uint32(len(events.Value().Entries))
 			default:
 				panic("invalid type")
 			}
@@ -362,15 +368,19 @@ func executeMessageInvalidAttributes(
 		eventLoggerAddress, err := DeployEventLogger(ctx, wallets[0], logger)
 		require.NoError(t, err)
 
-		// Intent to initiate message(or emit event) on chain A
-		txA := txintent.NewIntent[*txintent.InitTrigger, *txintent.InteropOutput](opts[0])
-		randomInitTrigger := RandomInitTrigger(rng, eventLoggerAddress, 3, 10)
-		txA.Content.Set(randomInitTrigger)
+		// Intent to initiate messages(or emit events) on chain A
+		initCalls := []txintent.Call{
+			RandomInitTrigger(rng, eventLoggerAddress, 3, 10),
+			RandomInitTrigger(rng, eventLoggerAddress, 2, 95),
+			RandomInitTrigger(rng, eventLoggerAddress, 1, 50),
+		}
+		txA := txintent.NewIntent[*txintent.MultiTrigger, *txintent.InteropOutput](opts[0])
+		txA.Content.Set(&txintent.MultiTrigger{Emitter: constants.MultiCall3, Calls: initCalls})
 
 		// Trigger single event
 		receiptA, err := txA.PlannedTx.Included.Eval(ctx)
 		require.NoError(t, err)
-		logger.Info("initiate message included", "block", receiptA.BlockHash)
+		logger.Info("initiate messages included", "block", receiptA.BlockHash)
 
 		// construct txplan opts for testing failed validating messages
 		optsForFail := txplan.Combine(
@@ -384,7 +394,7 @@ func executeMessageInvalidAttributes(
 			// test for every attributes to be faulty for upper bound tests
 			{randomOrigin, randomBlockNumber, randomLogIndex, randomTimestamp, randomChainID},
 			// test for non-random invalid attributes
-			{mismatchedLogIndex}, {mismatchedTimestamp}, {msgNotPresent},
+			{mismatchedLogIndex}, {mismatchedTimestamp}, {msgNotPresent}, {logIndexGreaterOrEqualToEventCnt},
 		}
 		for _, faults := range faultsLists {
 			logger.Info("attempt to validate message with invalid attribute", "faults", faults)
@@ -392,8 +402,9 @@ func executeMessageInvalidAttributes(
 			txB := txintent.NewIntent[*txintent.ExecTrigger, *txintent.InteropOutput](optsForFail)
 			txB.Content.DependOn(&txA.Result)
 
-			// Single event in tx so index is 0, and also inject faults
-			txB.Content.Fn(executeIndexedFault(constants.CrossL2Inbox, &txA.Result, 0, rng, faults, sys))
+			// Random select event index in tx for injecting faults
+			eventIdx := rng.Intn(len(initCalls))
+			txB.Content.Fn(executeIndexedFault(constants.CrossL2Inbox, &txA.Result, eventIdx, rng, faults, sys))
 
 			// make sure that the transaction is not reverted by CrossL2Inbox...
 			gas, err := txB.PlannedTx.Gas.Eval(ctx)
