@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
-	"time"
 
 	"github.com/ethereum-optimism/optimism/op-service/client"
 	"github.com/ethereum-optimism/optimism/op-service/sources"
@@ -39,19 +38,7 @@ func NewWalletV2FromWalletAndChain(ctx context.Context, wallet Wallet, chain Cha
 
 func NewWalletV2(ctx context.Context, rpcURL string, priv *ecdsa.PrivateKey, clCfg *sources.EthClientConfig, log log.Logger) (*walletV2, error) {
 	if clCfg == nil {
-		clCfg = &sources.EthClientConfig{
-			MaxRequestsPerBatch:   10,
-			MaxConcurrentRequests: 10,
-			ReceiptsCacheSize:     10,
-			TransactionsCacheSize: 10,
-			HeadersCacheSize:      10,
-			PayloadsCacheSize:     10,
-			BlockRefsCacheSize:    10,
-			TrustRPC:              false,
-			MustBePostMerge:       true,
-			RPCProviderKind:       sources.RPCKindStandard,
-			MethodResetDuration:   time.Minute,
-		}
+		clCfg = sources.DefaultEthClientConfig(10)
 	}
 	rpcClient, err := rpc.DialContext(ctx, rpcURL)
 	if err != nil {
