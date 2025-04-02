@@ -398,11 +398,7 @@ func TestNewForgeScriptFromFile(t *testing.T) {
 		host := NewHost(logger, af, nil, DefaultContext)
 
 		// We'll use an example script that returns the input data, just mapped to a different struct
-		script, err := NewForgeScriptFromFile(host, "DeployScriptExample.s.sol", "DeployScriptExample")
-		require.NoError(t, err)
-
-		// We wrap the script with a strongly-typed wrapper
-		deploySuperchain, err := NewDeployScriptWithOutput[DeployScriptExampleInput, DeployScriptExampleOutput](script, "run")
+		deployExampleScript, err := NewDeployScriptWithOutputFromFile[DeployScriptExampleInput, DeployScriptExampleOutput](host, "DeployScriptExample.s.sol", "DeployScriptExample")
 		require.NoError(t, err)
 
 		// Put some input & expected output together
@@ -416,7 +412,7 @@ func TestNewForgeScriptFromFile(t *testing.T) {
 		}
 
 		// And make sure that we get what we would expect
-		output, err := deploySuperchain.Run(input)
+		output, err := deployExampleScript.Run(input)
 		require.NoError(t, err)
 		require.Equal(t, expectedOutput, output)
 
@@ -425,7 +421,7 @@ func TestNewForgeScriptFromFile(t *testing.T) {
 			InputFieldA: common.BigToAddress(big.NewInt(0)),
 			InputFieldB: common.BigToAddress(big.NewInt(0)),
 		}
-		_, err = deploySuperchain.Run(zeroInput)
+		_, err = deployExampleScript.Run(zeroInput)
 		require.ErrorContains(t, err, "failed to call script DeployScriptExample using data 0xfc61915400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000: failed to call backend: execution reverted at")
 	})
 }
