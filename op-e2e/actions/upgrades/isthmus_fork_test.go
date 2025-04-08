@@ -87,20 +87,20 @@ func TestIsthmusActivationAtGenesis(gt *testing.T) {
 	require.True(t, ok, "CheckBlockHash must pass")
 }
 
-// There are 2 stages pre-Isthmus that we need to test:
-// 1. Pre-Canyon: withdrawals root should be nil
-// 2. Post-Canyon: withdrawals root should be EmptyWithdrawalsHash
-func TestWithdrawlsRootPreCanyonAndIsthmus(gt *testing.T) {
+// There is 1 stage pre-Isthmus that we need to test
+// (technically there is a pre-Canyon nil case, but Canyon does not support Cancun L1, and is thus not included):
+// Pre-Isthmus: withdrawals root should be EmptyWithdrawalsHash
+func TestWithdrawalsRootIsthmus(gt *testing.T) {
 	t := helpers.NewDefaultTesting(gt)
 	dp := e2eutils.MakeDeployParams(t, helpers.DefaultRollupTestParams())
-	canyonOffset := hexutil.Uint64(2)
+	isthmusOffset := hexutil.Uint64(2)
 
 	log := testlog.Logger(t, log.LvlDebug)
 
-	dp.DeployConfig.L1CancunTimeOffset = &canyonOffset
+	dp.DeployConfig.L2GenesisIsthmusTimeOffset = &isthmusOffset
 
-	// Activate pre-canyon forks at genesis, and schedule Canyon the block after
-	dp.DeployConfig.ActivateForkAtOffset(rollup.Canyon, uint64(canyonOffset))
+	// Activate pre-isthmus forks at genesis, and schedule Isthmus the block after
+	dp.DeployConfig.ActivateForkAtOffset(rollup.Isthmus, uint64(isthmusOffset))
 	require.NoError(t, dp.DeployConfig.Check(log), "must have valid config")
 
 	sd := e2eutils.Setup(t, dp, helpers.DefaultAlloc)
@@ -110,10 +110,10 @@ func TestWithdrawlsRootPreCanyonAndIsthmus(gt *testing.T) {
 	sequencer.ActL2PipelineFull(t)
 	verifier.ActL2PipelineFull(t)
 
-	verifyPreCanyonHeaderWithdrawalsRoot(gt, engine.L2Chain().CurrentBlock())
+	verifyPreIsthmusHeaderWithdrawalsRoot(gt, engine.L2Chain().CurrentBlock())
 
-	// build blocks until canyon activates
-	sequencer.ActBuildL2ToCanyon(t)
+	// build blocks until Isthmus activates
+	sequencer.ActBuildL2ToIsthmus(t)
 
 	// Send withdrawal transaction
 	// Bind L2 Withdrawer Contract
@@ -133,7 +133,7 @@ func TestWithdrawlsRootPreCanyonAndIsthmus(gt *testing.T) {
 	sequencer.ActL2EmptyBlock(t)
 	sequencer.ActL2EmptyBlock(t)
 
-	verifyPreIsthmusHeaderWithdrawalsRoot(gt, engine.L2Chain().CurrentBlock())
+	verifyIsthmusHeaderWithdrawalsRoot(gt, engine.RPCClient(), engine.L2Chain().CurrentBlock(), true)
 }
 
 // In this section, we will test the following combinations
@@ -270,11 +270,6 @@ func TestWithdrawlsRootPostIsthmus(gt *testing.T) {
 	require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status, "transaction had incorrect status")
 
 	verifyIsthmusHeaderWithdrawalsRoot(gt, rpcCl, engine.L2Chain().CurrentBlock(), true)
-}
-
-// Pre-Canyon, the withdrawals root field in the header should be nil
-func verifyPreCanyonHeaderWithdrawalsRoot(gt *testing.T, header *types.Header) {
-	require.Nil(gt, header.WithdrawalsHash)
 }
 
 // Post-Canyon, the withdrawals root field in the header should be EmptyWithdrawalsHash
