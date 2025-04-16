@@ -97,7 +97,7 @@ func (d *DevnetEnv) GetChain(chainName string) (*ChainConfig, error) {
 	} else {
 		for _, l2Chain := range d.Env.L2 {
 			if l2Chain.Name == chainName {
-				chain = &l2Chain.Chain
+				chain = l2Chain.Chain
 				break
 			}
 		}
