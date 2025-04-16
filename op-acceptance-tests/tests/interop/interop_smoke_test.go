@@ -31,20 +31,20 @@ func smokeTestScenario(chainIdx uint64, walletGetter validators.WalletGetter) sy
 		funds := sdktypes.NewBalance(big.NewInt(0.5 * constants.ETH))
 		user := walletGetter(ctx)
 
-		scw0Addr := constants.SuperchainWETH
-		scw0, err := chain.Nodes()[0].ContractsRegistry().SuperchainWETH(scw0Addr)
+		bridgeAddr := constants.SuperchainETHBridge
+		bridge, err := chain.Nodes()[0].ContractsRegistry().SuperchainWETH(bridgeAddr)
 		require.NoError(t, err)
-		logger.Info("using SuperchainWETH", "contract", scw0Addr)
+		logger.Info("using SuperchainWETH", "contract", bridgeAddr)
 
-		initialBalance, err := scw0.BalanceOf(user.Address()).Call(ctx)
+		initialBalance, err := bridge.BalanceOf(user.Address()).Call(ctx)
 		require.NoError(t, err)
 		logger = logger.With("user", user.Address())
 		logger.Info("initial balance retrieved", "balance", initialBalance)
 
 		logger.Info("sending ETH to contract", "amount", funds)
-		require.NoError(t, user.SendETH(scw0Addr, funds).Send(ctx).Wait())
+		require.NoError(t, user.SendETH(bridgeAddr, funds).Send(ctx).Wait())
 
-		balance, err := scw0.BalanceOf(user.Address()).Call(ctx)
+		balance, err := bridge.BalanceOf(user.Address()).Call(ctx)
 		require.NoError(t, err)
 		logger.Info("final balance retrieved", "balance", balance)
 
