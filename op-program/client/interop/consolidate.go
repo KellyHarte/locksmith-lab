@@ -41,9 +41,32 @@ func ReceiptsToExecutingMessages(depset depset.ChainIndexFromID, receipts ethtyp
 	return execMsgs, curr, nil
 }
 
+type execMessageCacheEntry struct {
+	execMsgs map[uint32]*supervisortypes.ExecutingMessage
+	logCount uint32
+}
+
 type consolidateState struct {
 	*types.TransitionState
 	replacedChains map[eth.ChainID]bool
+
+	// execMessageCache is used to memoize iteration of logs in blocks to speed up executing message retrieval
+	execMessageCache map[common.Hash]execMessageCacheEntry
+}
+
+func newConsolidateState(transitionState *types.TransitionState) *consolidateState {
+	s := &consolidateState{
+		TransitionState: &types.TransitionState{
+			PendingProgress: make([]types.OptimisticBlock, len(transitionState.PendingProgress)),
+			SuperRoot:       transitionState.SuperRoot,
+			Step:            transitionState.Step,
+		},
+		replacedChains:   make(map[eth.ChainID]bool),
+		execMessageCache: make(map[common.Hash]execMessageCacheEntry),
+	}
+	// We will be updating the transition state as blocks are replaced, so make a copy
+	copy(s.PendingProgress, transitionState.PendingProgress)
+	return s
 }
 
 func (s *consolidateState) isReplaced(chainID eth.ChainID) bool {
@@ -56,6 +79,21 @@ func (s *consolidateState) setReplaced(transitionStateIndex int, chainID eth.Cha
 	s.replacedChains[chainID] = true
 }
 
+func (s *consolidateState) getCachedExecMsgs(blockHash common.Hash) (map[uint32]*supervisortypes.ExecutingMessage, uint32, bool) {
+	entry, ok := s.execMessageCache[blockHash]
+	if !ok {
+		return nil, 0, false
+	}
+	return entry.execMsgs, entry.logCount, true
+}
+
+func (s *consolidateState) setCachedExecMsgs(blockHash common.Hash, execMsgs map[uint32]*supervisortypes.ExecutingMessage, logCount uint32) {
+	s.execMessageCache[blockHash] = execMessageCacheEntry{
+		execMsgs: execMsgs,
+		logCount: logCount,
+	}
+}
+
 func RunConsolidation(
 	logger log.Logger,
 	bootInfo *boot.BootInfoInterop,
@@ -65,16 +103,7 @@ func RunConsolidation(
 	superRoot *eth.SuperV1,
 	tasks taskExecutor,
 ) (eth.Bytes32, error) {
-	consolidateState := consolidateState{
-		TransitionState: &types.TransitionState{
-			PendingProgress: make([]types.OptimisticBlock, len(transitionState.PendingProgress)),
-			SuperRoot:       transitionState.SuperRoot,
-			Step:            transitionState.Step,
-		},
-		replacedChains: make(map[eth.ChainID]bool),
-	}
-	// We will be updating the transition state as blocks are replaced, so make a copy
-	copy(consolidateState.PendingProgress, transitionState.PendingProgress)
+	consolidateState := newConsolidateState(transitionState)
 	// Use a reference to the transition state so the consolidate oracle has a recent view.
 	// The TransitionStateByRoot method isn't expected to be used during consolidation,
 	// but we pass the state for safety in case this changes in the future.
@@ -83,7 +112,7 @@ func RunConsolidation(
 	// Keep consolidating until there are no more invalid blocks to replace
 loop:
 	for {
-		err := singleRoundConsolidation(logger, bootInfo, l1PreimageOracle, consolidateOracle, &consolidateState, superRoot, tasks)
+		err := singleRoundConsolidation(logger, bootInfo, l1PreimageOracle, consolidateOracle, consolidateState, superRoot, tasks)
 		switch {
 		case err == nil:
 			break loop
@@ -122,7 +151,7 @@ func singleRoundConsolidation(
 	if err != nil {
 		return fmt.Errorf("failed to get dependency set: %w", err)
 	}
-	deps, err := newConsolidateCheckDeps(depset, bootInfo, consolidateState.TransitionState, superRoot.Chains, l2PreimageOracle)
+	deps, err := newConsolidateCheckDeps(depset, bootInfo, consolidateState.TransitionState, superRoot.Chains, l2PreimageOracle, consolidateState)
 	if err != nil {
 		return fmt.Errorf("failed to create consolidate check deps: %w", err)
 	}
@@ -230,6 +259,8 @@ type consolidateCheckDeps struct {
 	oracle      l2.Oracle
 	depset      depset.DependencySet
 	canonBlocks map[eth.ChainID]*l2.FastCanonicalBlockHeaderOracle
+
+	consolidateState *consolidateState
 }
 
 func newConsolidateCheckDeps(
@@ -238,6 +269,7 @@ func newConsolidateCheckDeps(
 	transitionState *types.TransitionState,
 	chains []eth.ChainIDAndOutput,
 	oracle l2.Oracle,
+	consolidateState *consolidateState,
 ) (*consolidateCheckDeps, error) {
 	// TODO(#14415): handle case where dep set changes in a given timestamp
 	canonBlocks := make(map[eth.ChainID]*l2.FastCanonicalBlockHeaderOracle)
@@ -258,9 +290,10 @@ func newConsolidateCheckDeps(
 	}
 
 	return &consolidateCheckDeps{
-		oracle:      oracle,
-		depset:      depset,
-		canonBlocks: canonBlocks,
+		oracle:           oracle,
+		depset:           depset,
+		canonBlocks:      canonBlocks,
+		consolidateState: consolidateState,
 	}, nil
 }
 
@@ -338,11 +371,16 @@ func (d *consolidateCheckDeps) OpenBlock(
 		Hash:   block.Hash(),
 		Number: block.NumberU64(),
 	}
+	if execMsgs, logCount, ok := d.consolidateState.getCachedExecMsgs(block.Hash()); ok {
+		return ref, logCount, execMsgs, nil
+	}
+
 	_, receipts := d.oracle.ReceiptsByBlockHash(block.Hash(), chainID)
 	execMsgs, logCount, err = ReceiptsToExecutingMessages(d.depset, receipts)
 	if err != nil {
 		return eth.BlockRef{}, 0, nil, err
 	}
+	d.consolidateState.setCachedExecMsgs(block.Hash(), execMsgs, logCount)
 	return ref, logCount, execMsgs, nil
 }
 
