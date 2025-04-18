@@ -885,7 +885,7 @@ func (m *SimpleTxManager) increaseGasPrice(ctx context.Context, tx *types.Transa
 	signedTx, err := m.cfg.Signer(ctx, m.cfg.From, newTx)
 	if err != nil {
 		m.l.Warn("failed to sign new transaction", "err", err, "tx", tx.Hash())
-		return tx, nil
+		return nil, err
 	}
 	return signedTx, nil
 }
