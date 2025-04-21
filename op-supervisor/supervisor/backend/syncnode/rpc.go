@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ethereum-optimism/optimism/op-service/rpc"
+	"github.com/ethereum-optimism/optimism/op-supervisor/supervisor/backend/processors"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -158,4 +159,59 @@ func (rs *RPCSyncNode) AnchorPoint(ctx context.Context) (types.DerivedBlockRefPa
 	var out types.DerivedBlockRefPair
 	err := rs.cl.CallContext(ctx, &out, "interop_anchorPoint")
 	return out, err
+}
+
+// Contains returns no error iff the specified logHash is recorded in the specified blockNum and logIdx.
+// If the log is out of reach and the block is complete, an ErrConflict is returned.
+// If the log is out of reach and the block is not complete, an ErrFuture is returned.
+// If the log is determined to conflict with the canonical chain, then ErrConflict is returned.
+// logIdx is the index of the log in the array of all logs in the block.
+// This can be used to check the validity of cross-chain interop events.
+// The block-seal of the blockNum block that the log was included in is returned.
+func (rs *RPCSyncNode) Contains(ctx context.Context, query types.ContainsQuery) (types.BlockSeal, error) {
+	chainID, err := rs.ChainID(ctx)
+	if err != nil {
+		return types.BlockSeal{}, fmt.Errorf("failed to get chain ID for verifying access with RPC: %w", err)
+	}
+
+	blockRef, err := rs.BlockRefByNumber(ctx, query.BlockNum)
+	if err != nil {
+		return types.BlockSeal{}, types.ErrFuture
+	}
+
+	log, err := rs.getLogAtIndex(ctx, blockRef.Hash, query.LogIdx)
+	if err != nil {
+		return types.BlockSeal{}, types.ErrConflict
+	}
+
+	logHash := processors.LogToLogHash(log)
+	entryChecksum := types.ChecksumArgs{
+		BlockNumber: query.BlockNum,
+		LogIndex:    query.LogIdx,
+		Timestamp:   blockRef.Time,
+		ChainID:     chainID,
+		LogHash:     logHash,
+	}.Checksum()
+	if entryChecksum != query.Checksum {
+		return types.BlockSeal{}, types.ErrConflict
+	}
+
+	return types.BlockSeal{
+		Hash:      blockRef.Hash,
+		Number:    blockRef.Number,
+		Timestamp: blockRef.Time,
+	}, nil
+}
+
+func (rs *RPCSyncNode) getLogAtIndex(ctx context.Context, blockHash common.Hash, logIndex uint32) (*gethtypes.Log, error) {
+	receipts, err := rs.FetchReceipts(ctx, blockHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch receipts for verifying access with RPC: %w", err)
+	}
+
+	log, err := eth.GetLogAtIndex(receipts, uint(logIndex))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get log index for verifying access with RPC: %w", err)
+	}
+	return log, err
 }
