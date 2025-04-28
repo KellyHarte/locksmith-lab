@@ -2,6 +2,7 @@ package tests
 
 import (
 	"io"
+	"os"
 
 	"github.com/ethereum-optimism/optimism/cannon/mipsevm/versions"
 	"github.com/ethereum/go-ethereum/log"
@@ -161,4 +162,11 @@ func GenerateEmptyThreadProofVariations(t require.TestingT) []threadProofTestcas
 		{Name: "zeroed thread bytes proof", Proof: zeroBytesThreadProof},
 		{Name: "nil thread bytes proof", Proof: nilBytesThreadProof},
 	}
+}
+
+func setupWithTestCase(t require.TestingT, v VersionedVMTestCase, randomSeed int, preimageOracle mipsevm.PreimageOracle, opts ...testutil.StateOption) (mipsevm.FPVM, *multithreaded.State, *testutil.ContractMetadata) {
+	allOpts := append([]testutil.StateOption{testutil.WithRandomization(int64(randomSeed))}, opts...)
+	vm := v.VMFactory(preimageOracle, os.Stdout, os.Stderr, testutil.CreateLogger(), allOpts...)
+	state := mttestutil.GetMtState(t, vm)
+	return vm, state, v.Contracts
 }

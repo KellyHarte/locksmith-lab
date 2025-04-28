@@ -103,7 +103,7 @@ func RunVMTest_Hello[T mipsevm.FPVMState](t *testing.T, initState program.Create
 	var stdOutBuf, stdErrBuf bytes.Buffer
 	us := vmFactory(state, nil, io.MultiWriter(&stdOutBuf, os.Stdout), io.MultiWriter(&stdErrBuf, os.Stderr), CreateLogger(), meta)
 
-	maxSteps := 430_000
+	maxSteps := 450_000
 	for i := 0; i < maxSteps; i++ {
 		if us.GetState().GetExited() {
 			break

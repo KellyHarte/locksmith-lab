@@ -51,13 +51,19 @@ check-custom-chains: op-program-host
 	./bin/op-program configs check-custom-chains
 
 reproducible-prestate: check-custom-chains
+	@docker build --output ./bin/ --progress plain -f Dockerfile.repro.next ../
 	@docker build --output ./bin/ --progress plain -f Dockerfile.repro ../
+	@echo "-------------------- Production Prestates --------------------\n"
 	@echo "Cannon Absolute prestate hash: "
 	@cat ./bin/prestate-proof.json | jq -r .pre
-	@echo "Cannon64 Absolute prestate hash: "
+	@echo "\nCannon64 Absolute prestate hash: "
 	@cat ./bin/prestate-proof-mt64.json | jq -r .pre
+	@echo "\n-------------------- Experimental Prestates --------------------\n"
 	@echo "CannonInterop Absolute prestate hash: "
 	@cat ./bin/prestate-proof-interop.json | jq -r .pre
+	@echo "\nCannon64Next Absolute prestate hash: "
+	@cat ./bin/prestate-proof-mt64Next.json | jq -r .pre
+	@echo
 .PHONY: reproducible-prestate
 
 verify-reproducibility:

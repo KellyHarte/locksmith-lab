@@ -49,10 +49,11 @@ const (
 type AllocType string
 
 const (
-	AllocTypeStandard AllocType = "standard"
-	AllocTypeAltDA    AllocType = "alt-da"
-	AllocTypeL2OO     AllocType = "l2oo"
-	AllocTypeMTCannon AllocType = "mt-cannon"
+	AllocTypeStandard     AllocType = "standard"
+	AllocTypeAltDA        AllocType = "alt-da"
+	AllocTypeL2OO         AllocType = "l2oo"
+	AllocTypeMTCannon     AllocType = "mt-cannon"
+	AllocTypeMTCannonNext AllocType = "mt-cannon-next"
 
 	DefaultAllocType = AllocTypeStandard
 )
@@ -66,14 +67,14 @@ func (a AllocType) Check() error {
 
 func (a AllocType) UsesProofs() bool {
 	switch a {
-	case AllocTypeStandard, AllocTypeMTCannon, AllocTypeAltDA:
+	case AllocTypeStandard, AllocTypeMTCannon, AllocTypeMTCannonNext, AllocTypeAltDA:
 		return true
 	default:
 		return false
 	}
 }
 
-var allocTypes = []AllocType{AllocTypeStandard, AllocTypeAltDA, AllocTypeL2OO, AllocTypeMTCannon}
+var allocTypes = []AllocType{AllocTypeStandard, AllocTypeAltDA, AllocTypeL2OO, AllocTypeMTCannon, AllocTypeMTCannonNext}
 
 var (
 	// All of the following variables are set in the init function
@@ -507,7 +508,9 @@ func decompressGzipJSON(p string, thing any) {
 
 func cannonVMType(allocType AllocType) state.VMType {
 	if allocType == AllocTypeMTCannon {
-		return state.VMTypeCannon2
+		return state.VMTypeCannon6
+	} else if allocType == AllocTypeMTCannonNext {
+		return state.VMTypeCannon7
 	}
 	return state.VMTypeCannon1
 }
@@ -517,8 +520,10 @@ type prestateFile struct {
 }
 
 var cannonPrestateMT common.Hash
+var cannonPrestateMTNext common.Hash
 var cannonPrestateST common.Hash
 var cannonPrestateMTOnce sync.Once
+var cannonPrestateMTNextOnce sync.Once
 var cannonPrestateSTOnce sync.Once
 
 func cannonPrestate(monorepoRoot string, allocType AllocType) common.Hash {
@@ -526,14 +531,21 @@ func cannonPrestate(monorepoRoot string, allocType AllocType) common.Hash {
 
 	var once *sync.Once
 	var cacheVar *common.Hash
-	if cannonVMType(allocType) == state.VMTypeCannon1 {
+	cannonVmType := cannonVMType(allocType)
+	if cannonVmType == state.VMTypeCannon1 {
 		filename = "prestate-proof.json"
 		once = &cannonPrestateSTOnce
 		cacheVar = &cannonPrestateST
-	} else {
+	} else if cannonVmType == state.VMTypeCannon2 || cannonVmType == state.VMTypeCannon6 {
 		filename = "prestate-proof-mt64.json"
 		once = &cannonPrestateMTOnce
 		cacheVar = &cannonPrestateMT
+	} else if cannonVmType == state.VMTypeCannon7 {
+		filename = "prestate-proof-mt64Next.json"
+		once = &cannonPrestateMTNextOnce
+		cacheVar = &cannonPrestateMTNext
+	} else {
+		panic("Unsupported cannon VM type: " + cannonVmType)
 	}
 
 	once.Do(func() {

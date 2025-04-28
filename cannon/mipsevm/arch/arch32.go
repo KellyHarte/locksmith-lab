@@ -74,6 +74,7 @@ const (
 	SysTgkill        = 4266
 	SysGetRLimit     = 4076
 	SysLseek         = 4019
+	SysEventFd2      = 4325
 	// Profiling-related syscalls
 	SysSetITimer    = 4104
 	SysTimerCreate  = 4257

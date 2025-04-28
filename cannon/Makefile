@@ -39,6 +39,7 @@ cannon-embeds: cannon32-impl cannon64-impl
 	@cp bin/cannon32-impl ./multicannon/embeds/cannon-5
 	# 64-bit multithreaded vm
 	@cp bin/cannon64-impl ./multicannon/embeds/cannon-6
+	@cp bin/cannon64-impl ./multicannon/embeds/cannon-7
 
 cannon: cannon-embeds
 	env GO111MODULE=on GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -v $(LDFLAGS) -o ./bin/cannon ./multicannon/
@@ -46,8 +47,13 @@ cannon: cannon-embeds
 clean:
 	rm -rf bin multicannon/embeds/cannon*
 
-elf:
-	make -C ./testdata/example elf
+elf: elf-go-122 elf-go-123
+
+elf-go-122:
+	make -C ./testdata/go-1-22 elf
+
+elf-go-123:
+	make -C ./testdata/go-1-23 elf
 
 sanitize-program:
 	mips-linux-gnu-objdump -d -j .text $$GUEST_PROGRAM > ./bin/dump.txt
@@ -67,7 +73,7 @@ test: elf contract test64
 test64: elf contract
 	go test -tags=cannon64 -run '(TestEVM.*64|TestHelloEVM|TestClaimEVM)' ./mipsevm/tests
 
-diff-%-cannon: cannon elf
+diff-%-cannon: cannon elf-go-122
 	# Load an elf file to create a prestate, and check that both cannon versions generate the same prestate
 	@VM=$*; \
 	echo "Running diff for VM type $${VM}"; \
@@ -78,8 +84,8 @@ diff-%-cannon: cannon elf
 		echo "Loading 32-bit program"; \
 		ELF_SUFFIX="elf"; \
 	fi; \
-	$$OTHER_CANNON load-elf --type $$VM --path ./testdata/example/bin/hello.$${ELF_SUFFIX} --out ./bin/prestate-other.bin.gz --meta ""; \
-	./bin/cannon   load-elf --type $$VM --path ./testdata/example/bin/hello.$${ELF_SUFFIX} --out ./bin/prestate.bin.gz --meta "";
+	$$OTHER_CANNON load-elf --type $$VM --path ./testdata/go-1-22/bin/hello.$${ELF_SUFFIX} --out ./bin/prestate-other.bin.gz --meta ""; \
+	./bin/cannon   load-elf --type $$VM --path ./testdata/go-1-22/bin/hello.$${ELF_SUFFIX} --out ./bin/prestate.bin.gz --meta "";
 	@cmp ./bin/prestate-other.bin.gz ./bin/prestate.bin.gz;
 	@if [ $$? -eq 0 ]; then \
 		echo "Generated identical prestates"; \
@@ -134,6 +140,9 @@ fuzz:
 	cannon-embeds \
 	cannon \
 	clean \
+	elf \
+	elf-go-122 \
+	elf-go-123 \
 	test \
 	lint \
 	fuzz \

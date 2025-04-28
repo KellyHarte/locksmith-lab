@@ -64,9 +64,16 @@ func ToSignedInteger(x Word) arch.SignedInteger {
 	return arch.SignedInteger(x)
 }
 
-// Cannon32OnlyTest skips the test if it's not a cannon64 build
+// Cannon32OnlyTest skips the test if it targets 64-bit Cannon
 func Cannon32OnlyTest(t testing.TB, msg string, args ...any) {
 	if !arch.IsMips32 {
+		t.Skipf(msg, args...)
+	}
+}
+
+// Cannon64OnlyTest skips the test if it targets 32-bit Cannon
+func Cannon64OnlyTest(t testing.TB, msg string, args ...any) {
+	if arch.IsMips32 {
 		t.Skipf(msg, args...)
 	}
 }

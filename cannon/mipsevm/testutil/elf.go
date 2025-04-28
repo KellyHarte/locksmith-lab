@@ -34,5 +34,5 @@ func ProgramPath(programName string) string {
 	if !arch.IsMips32 {
 		basename = programName + ".64.elf"
 	}
-	return "../../testdata/example/bin/" + basename
+	return "../../testdata/go-1-23/bin/" + basename
 }

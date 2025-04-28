@@ -1009,6 +1009,7 @@ func TestEVM_Fault(t *testing.T) {
 }
 
 func TestEVM_HelloProgram(t *testing.T) {
+	testutil.Cannon64OnlyTest(t, "32-bit Cannon is deprecated")
 	if os.Getenv("SKIP_SLOW_TESTS") == "true" {
 		t.Skip("Skipping slow test because SKIP_SLOW_TESTS is enabled")
 	}
@@ -1028,7 +1029,7 @@ func TestEVM_HelloProgram(t *testing.T) {
 			state := goVm.GetState()
 
 			start := time.Now()
-			for i := 0; i < 430_000; i++ {
+			for i := 0; i < 450_000; i++ {
 				step := goVm.GetState().GetStep()
 				if goVm.GetState().GetExited() {
 					break
@@ -1056,6 +1057,7 @@ func TestEVM_HelloProgram(t *testing.T) {
 }
 
 func TestEVM_ClaimProgram(t *testing.T) {
+	testutil.Cannon64OnlyTest(t, "32-bit Cannon is deprecated")
 	if os.Getenv("SKIP_SLOW_TESTS") == "true" {
 		t.Skip("Skipping slow test because SKIP_SLOW_TESTS is enabled")
 	}
@@ -1102,6 +1104,7 @@ func TestEVM_ClaimProgram(t *testing.T) {
 }
 
 func TestEVM_EntryProgram(t *testing.T) {
+	testutil.Cannon64OnlyTest(t, "32-bit Cannon is deprecated")
 	if os.Getenv("SKIP_SLOW_TESTS") == "true" {
 		t.Skip("Skipping slow test because SKIP_SLOW_TESTS is enabled")
 	}

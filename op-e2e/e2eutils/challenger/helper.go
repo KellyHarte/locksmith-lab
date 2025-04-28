@@ -35,9 +35,10 @@ import (
 type PrestateVariant string
 
 const (
-	STCannonVariant PrestateVariant = ""
-	MTCannonVariant PrestateVariant = "mt64"
-	InteropVariant  PrestateVariant = "interop"
+	STCannonVariant     PrestateVariant = ""
+	MTCannonVariant     PrestateVariant = "mt64"
+	MTCannonNextVariant PrestateVariant = "mt64Next"
+	InteropVariant      PrestateVariant = "interop"
 )
 
 type EndpointProvider interface {

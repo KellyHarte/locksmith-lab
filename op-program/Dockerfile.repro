@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
         GIT_DATE="$GIT_DATE" \
         CANNON_VERSION="$CANNON_VERSION" \
         OP_PROGRAM_VERSION="$OP_PROGRAM_VERSION" \
-        build-all
+        build-current
 
 # Exports files to the specified output location.
 # Writing files to host requires buildkit to be enabled.

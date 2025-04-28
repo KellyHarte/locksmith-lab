@@ -48,47 +48,51 @@ func TestEVM_MT_LL(t *testing.T) {
 		{name: "Unaligned addr, addr sign extended w overflow", base: 0xFF12_0001, offset: 0x8405, expectedAddr: 0xFF11_8406, memValue: posValue, retVal: posValueRet, rtReg: 5},
 		{name: "Return register set to 0", base: 0xFF12_0001, offset: 0x7404, expectedAddr: 0xFF12_7405, memValue: posValue, retVal: 0, rtReg: 0},
 	}
-	for i, c := range cases {
-		for _, withExistingReservation := range []bool{true, false} {
-			tName := fmt.Sprintf("%v (withExistingReservation = %v)", c.name, withExistingReservation)
-			t.Run(tName, func(t *testing.T) {
-				rtReg := c.rtReg
-				baseReg := 6
-				insn := uint32((0b11_0000 << 26) | (baseReg & 0x1F << 21) | (rtReg & 0x1F << 16) | (0xFFFF & c.offset))
-				goVm, state, contracts := setup(t, i, nil, testutil.WithPCAndNextPC(0x40))
-				step := state.GetStep()
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		for i, c := range cases {
+			for _, withExistingReservation := range []bool{true, false} {
+				tName := fmt.Sprintf("%v (vm = %v, withExistingReservation = %v)", c.name, ver.Name, withExistingReservation)
+				t.Run(tName, func(t *testing.T) {
+					rtReg := c.rtReg
+					baseReg := 6
+					insn := uint32((0b11_0000 << 26) | (baseReg & 0x1F << 21) | (rtReg & 0x1F << 16) | (0xFFFF & c.offset))
+					goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(i)), testutil.WithPCAndNextPC(0x40))
+					state := mttestutil.GetMtState(t, goVm)
+					step := state.GetStep()
 
-				// Set up state
-				testutil.SetMemoryUint64(t, state.GetMemory(), Word(c.expectedAddr), c.memValue)
-				testutil.StoreInstruction(state.GetMemory(), state.GetPC(), insn)
-				state.GetRegistersRef()[baseReg] = Word(c.base)
-				if withExistingReservation {
-					state.LLReservationStatus = multithreaded.LLStatusActive32bit
-					state.LLAddress = Word(c.expectedAddr + 1)
-					state.LLOwnerThread = 123
-				} else {
-					state.LLReservationStatus = multithreaded.LLStatusNone
-					state.LLAddress = 0
-					state.LLOwnerThread = 0
-				}
+					// Set up state
+					testutil.SetMemoryUint64(t, state.GetMemory(), Word(c.expectedAddr), c.memValue)
+					testutil.StoreInstruction(state.GetMemory(), state.GetPC(), insn)
+					state.GetRegistersRef()[baseReg] = Word(c.base)
+					if withExistingReservation {
+						state.LLReservationStatus = multithreaded.LLStatusActive32bit
+						state.LLAddress = Word(c.expectedAddr + 1)
+						state.LLOwnerThread = 123
+					} else {
+						state.LLReservationStatus = multithreaded.LLStatusNone
+						state.LLAddress = 0
+						state.LLOwnerThread = 0
+					}
 
-				// Set up expectations
-				expected := mttestutil.NewExpectedMTState(state)
-				expected.ExpectStep()
-				expected.LLReservationStatus = multithreaded.LLStatusActive32bit
-				expected.LLAddress = Word(c.expectedAddr)
-				expected.LLOwnerThread = state.GetCurrentThread().ThreadId
-				if rtReg != 0 {
-					expected.ActiveThread().Registers[rtReg] = Word(c.retVal)
-				}
+					// Set up expectations
+					expected := mttestutil.NewExpectedMTState(state)
+					expected.ExpectStep()
+					expected.LLReservationStatus = multithreaded.LLStatusActive32bit
+					expected.LLAddress = Word(c.expectedAddr)
+					expected.LLOwnerThread = state.GetCurrentThread().ThreadId
+					if rtReg != 0 {
+						expected.ActiveThread().Registers[rtReg] = Word(c.retVal)
+					}
 
-				stepWitness, err := goVm.Step(true)
-				require.NoError(t, err)
+					stepWitness, err := goVm.Step(true)
+					require.NoError(t, err)
 
-				// Check expectations
-				expected.Validate(t, state)
-				testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
-			})
+					// Check expectations
+					expected.Validate(t, state)
+					testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+				})
+			}
 		}
 	}
 }
@@ -128,64 +132,68 @@ func TestEVM_MT_SC(t *testing.T) {
 		{name: "Unaligned addr, sign extended w overflow", base: 0xFF12_0001, offset: 0x8404, expectedAddr: 0xFF_11_8405, storeValue: 0xAABB_CCDD, rtReg: 5, threadId: 4},
 		{name: "Return register set to 0", base: 0xFF12_0001, offset: 0x7403, expectedAddr: 0xFF12_7404, storeValue: 0xAABB_CCDD, rtReg: 0, threadId: 4},
 	}
-	for i, c := range cases {
-		for _, v := range llVariations {
-			tName := fmt.Sprintf("%v (%v)", c.name, v.name)
-			t.Run(tName, func(t *testing.T) {
-				rtReg := c.rtReg
-				baseReg := 6
-				insn := uint32((0b11_1000 << 26) | (baseReg & 0x1F << 21) | (rtReg & 0x1F << 16) | (0xFFFF & c.offset))
-				goVm, state, contracts := setup(t, i, nil)
-				mttestutil.InitializeSingleThread(i*23456, state, i%2 == 1, testutil.WithPCAndNextPC(0x40))
-				step := state.GetStep()
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		for i, c := range cases {
+			for _, llVar := range llVariations {
+				tName := fmt.Sprintf("%v (%v,%v)", c.name, ver.Name, llVar.name)
+				t.Run(tName, func(t *testing.T) {
+					rtReg := c.rtReg
+					baseReg := 6
+					insn := uint32((0b11_1000 << 26) | (baseReg & 0x1F << 21) | (rtReg & 0x1F << 16) | (0xFFFF & c.offset))
+					goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(i)))
+					state := mttestutil.GetMtState(t, goVm)
+					mttestutil.InitializeSingleThread(i*23456, state, i%2 == 1, testutil.WithPCAndNextPC(0x40))
+					step := state.GetStep()
 
-				// Define LL-related params
-				var llAddress, llOwnerThread Word
-				if v.matchAddr {
-					llAddress = Word(c.expectedAddr)
-				} else {
-					llAddress = Word(c.expectedAddr) + 1
-				}
-				if v.matchThreadId {
-					llOwnerThread = c.threadId
-				} else {
-					llOwnerThread = c.threadId + 1
-				}
+					// Define LL-related params
+					var llAddress, llOwnerThread Word
+					if llVar.matchAddr {
+						llAddress = Word(c.expectedAddr)
+					} else {
+						llAddress = Word(c.expectedAddr) + 1
+					}
+					if llVar.matchThreadId {
+						llOwnerThread = c.threadId
+					} else {
+						llOwnerThread = c.threadId + 1
+					}
 
-				// Setup state
-				testutil.SetMemoryUint64(t, state.GetMemory(), Word(c.expectedAddr), memValue)
-				state.GetCurrentThread().ThreadId = c.threadId
-				testutil.StoreInstruction(state.GetMemory(), state.GetPC(), insn)
-				state.GetRegistersRef()[baseReg] = c.base
-				state.GetRegistersRef()[rtReg] = Word(c.storeValue)
-				state.LLReservationStatus = v.llReservationStatus
-				state.LLAddress = llAddress
-				state.LLOwnerThread = llOwnerThread
+					// Setup state
+					testutil.SetMemoryUint64(t, state.GetMemory(), Word(c.expectedAddr), memValue)
+					state.GetCurrentThread().ThreadId = c.threadId
+					testutil.StoreInstruction(state.GetMemory(), state.GetPC(), insn)
+					state.GetRegistersRef()[baseReg] = c.base
+					state.GetRegistersRef()[rtReg] = Word(c.storeValue)
+					state.LLReservationStatus = llVar.llReservationStatus
+					state.LLAddress = llAddress
+					state.LLOwnerThread = llOwnerThread
 
-				// Setup expectations
-				expected := mttestutil.NewExpectedMTState(state)
-				expected.ExpectStep()
-				var retVal Word
-				if v.shouldSucceed {
-					retVal = 1
-					expected.ExpectMemoryWriteUint32(t, Word(c.expectedAddr), c.storeValue)
-					expected.LLReservationStatus = multithreaded.LLStatusNone
-					expected.LLAddress = 0
-					expected.LLOwnerThread = 0
-				} else {
-					retVal = 0
-				}
-				if rtReg != 0 {
-					expected.ActiveThread().Registers[rtReg] = retVal
-				}
+					// Setup expectations
+					expected := mttestutil.NewExpectedMTState(state)
+					expected.ExpectStep()
+					var retVal Word
+					if llVar.shouldSucceed {
+						retVal = 1
+						expected.ExpectMemoryWriteUint32(t, Word(c.expectedAddr), c.storeValue)
+						expected.LLReservationStatus = multithreaded.LLStatusNone
+						expected.LLAddress = 0
+						expected.LLOwnerThread = 0
+					} else {
+						retVal = 0
+					}
+					if rtReg != 0 {
+						expected.ActiveThread().Registers[rtReg] = retVal
+					}
 
-				stepWitness, err := goVm.Step(true)
-				require.NoError(t, err)
+					stepWitness, err := goVm.Step(true)
+					require.NoError(t, err)
 
-				// Check expectations
-				expected.Validate(t, state)
-				testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
-			})
+					// Check expectations
+					expected.Validate(t, state)
+					testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+				})
+			}
 		}
 	}
 }
@@ -297,56 +305,61 @@ func TestEVM_SysClone_Successful(t *testing.T) {
 		{"traverse right", true},
 	}
 
-	for i, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			stackPtr := Word(100)
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		for i, c := range cases {
+			testName := fmt.Sprintf("%v (%v)", c.name, ver.Name)
+			t.Run(testName, func(t *testing.T) {
+				stackPtr := Word(100)
 
-			goVm, state, contracts := setup(t, i, nil)
-			mttestutil.InitializeSingleThread(i*333, state, c.traverseRight)
-			testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
-			state.GetRegistersRef()[2] = arch.SysClone        // the syscall number
-			state.GetRegistersRef()[4] = exec.ValidCloneFlags // a0 - first argument, clone flags
-			state.GetRegistersRef()[5] = stackPtr             // a1 - the stack pointer
-			step := state.GetStep()
+				goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(i)))
+				state := mttestutil.GetMtState(t, goVm)
+				mttestutil.InitializeSingleThread(i*333, state, c.traverseRight)
+				testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
+				state.GetRegistersRef()[2] = arch.SysClone        // the syscall number
+				state.GetRegistersRef()[4] = exec.ValidCloneFlags // a0 - first argument, clone flags
+				state.GetRegistersRef()[5] = stackPtr             // a1 - the stack pointer
+				step := state.GetStep()
 
-			// Sanity-check assumptions
-			require.Equal(t, Word(1), state.NextThreadId)
+				// Sanity-check assumptions
+				require.Equal(t, Word(1), state.NextThreadId)
 
-			// Setup expectations
-			expected := mttestutil.NewExpectedMTState(state)
-			expected.Step += 1
-			expectedNewThread := expected.ExpectNewThread()
-			expected.ActiveThreadId = expectedNewThread.ThreadId
-			expected.StepsSinceLastContextSwitch = 0
-			if c.traverseRight {
-				expected.RightStackSize += 1
-			} else {
-				expected.LeftStackSize += 1
-			}
-			// Original thread expectations
-			expected.PrestateActiveThread().PC = state.GetCpu().NextPC
-			expected.PrestateActiveThread().NextPC = state.GetCpu().NextPC + 4
-			expected.PrestateActiveThread().Registers[2] = 1
-			expected.PrestateActiveThread().Registers[7] = 0
-			// New thread expectations
-			expectedNewThread.PC = state.GetCpu().NextPC
-			expectedNewThread.NextPC = state.GetCpu().NextPC + 4
-			expectedNewThread.ThreadId = 1
-			expectedNewThread.Registers[register.RegSyscallRet1] = 0
-			expectedNewThread.Registers[register.RegSyscallErrno] = 0
-			expectedNewThread.Registers[register.RegSP] = stackPtr
+				// Setup expectations
+				expected := mttestutil.NewExpectedMTState(state)
+				expected.Step += 1
+				expectedNewThread := expected.ExpectNewThread()
+				expected.ActiveThreadId = expectedNewThread.ThreadId
+				expected.StepsSinceLastContextSwitch = 0
+				if c.traverseRight {
+					expected.RightStackSize += 1
+				} else {
+					expected.LeftStackSize += 1
+				}
+				// Original thread expectations
+				expected.PrestateActiveThread().PC = state.GetCpu().NextPC
+				expected.PrestateActiveThread().NextPC = state.GetCpu().NextPC + 4
+				expected.PrestateActiveThread().Registers[2] = 1
+				expected.PrestateActiveThread().Registers[7] = 0
+				// New thread expectations
+				expectedNewThread.PC = state.GetCpu().NextPC
+				expectedNewThread.NextPC = state.GetCpu().NextPC + 4
+				expectedNewThread.ThreadId = 1
+				expectedNewThread.Registers[register.RegSyscallRet1] = 0
+				expectedNewThread.Registers[register.RegSyscallErrno] = 0
+				expectedNewThread.Registers[register.RegSP] = stackPtr
 
-			var err error
-			var stepWitness *mipsevm.StepWitness
-			stepWitness, err = goVm.Step(true)
-			require.NoError(t, err)
+				var err error
+				var stepWitness *mipsevm.StepWitness
+				stepWitness, err = goVm.Step(true)
+				require.NoError(t, err)
 
-			expected.Validate(t, state)
-			activeStack, inactiveStack := mttestutil.GetThreadStacks(state)
-			require.Equal(t, 2, len(activeStack))
-			require.Equal(t, 0, len(inactiveStack))
-			testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
-		})
+				expected.Validate(t, state)
+				activeStack, inactiveStack := mttestutil.GetThreadStacks(state)
+				require.Equal(t, 2, len(activeStack))
+				require.Equal(t, 0, len(inactiveStack))
+				testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+			})
+		}
 	}
 }
 
@@ -359,32 +372,37 @@ func TestEVM_SysGetTID(t *testing.T) {
 		{"non-zero", 11},
 	}
 
-	for i, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			goVm, state, contracts := setup(t, i*789, nil)
-			mttestutil.InitializeSingleThread(i*789, state, false)
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		for i, c := range cases {
+			testName := fmt.Sprintf("%v (%v)", c.name, ver.Name)
+			t.Run(testName, func(t *testing.T) {
+				goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(i*789)))
+				state := mttestutil.GetMtState(t, goVm)
+				mttestutil.InitializeSingleThread(i*789, state, false)
 
-			state.GetCurrentThread().ThreadId = c.threadId
-			testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
-			state.GetRegistersRef()[2] = arch.SysGetTID // Set syscall number
-			step := state.Step
+				state.GetCurrentThread().ThreadId = c.threadId
+				testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
+				state.GetRegistersRef()[2] = arch.SysGetTID // Set syscall number
+				step := state.Step
 
-			// Set up post-state expectations
-			expected := mttestutil.NewExpectedMTState(state)
-			expected.ExpectStep()
-			expected.ActiveThread().Registers[2] = c.threadId
-			expected.ActiveThread().Registers[7] = 0
+				// Set up post-state expectations
+				expected := mttestutil.NewExpectedMTState(state)
+				expected.ExpectStep()
+				expected.ActiveThread().Registers[2] = c.threadId
+				expected.ActiveThread().Registers[7] = 0
 
-			// State transition
-			var err error
-			var stepWitness *mipsevm.StepWitness
-			stepWitness, err = goVm.Step(true)
-			require.NoError(t, err)
+				// State transition
+				var err error
+				var stepWitness *mipsevm.StepWitness
+				stepWitness, err = goVm.Step(true)
+				require.NoError(t, err)
 
-			// Validate post-state
-			expected.Validate(t, state)
-			testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
-		})
+				// Validate post-state
+				expected.Validate(t, state)
+				testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+			})
+		}
 	}
 }
 
@@ -400,39 +418,44 @@ func TestEVM_SysExit(t *testing.T) {
 		{name: "three threads ", threadCount: 3},
 	}
 
-	for i, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			exitCode := uint8(3)
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		for i, c := range cases {
+			testName := fmt.Sprintf("%v (%v)", c.name, ver.Name)
+			t.Run(testName, func(t *testing.T) {
+				exitCode := uint8(3)
 
-			goVm, state, contracts := setup(t, i*133, nil)
-			mttestutil.SetupThreads(int64(i*1111), state, i%2 == 0, c.threadCount, 0)
+				goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(i*133)))
+				state := mttestutil.GetMtState(t, goVm)
+				mttestutil.SetupThreads(int64(i*1111), state, i%2 == 0, c.threadCount, 0)
 
-			testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
-			state.GetRegistersRef()[2] = arch.SysExit   // Set syscall number
-			state.GetRegistersRef()[4] = Word(exitCode) // The first argument (exit code)
-			step := state.Step
+				testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
+				state.GetRegistersRef()[2] = arch.SysExit   // Set syscall number
+				state.GetRegistersRef()[4] = Word(exitCode) // The first argument (exit code)
+				step := state.Step
 
-			// Set up expectations
-			expected := mttestutil.NewExpectedMTState(state)
-			expected.Step += 1
-			expected.StepsSinceLastContextSwitch += 1
-			expected.ActiveThread().Exited = true
-			expected.ActiveThread().ExitCode = exitCode
-			if c.shouldExitGlobally {
-				expected.Exited = true
-				expected.ExitCode = exitCode
-			}
+				// Set up expectations
+				expected := mttestutil.NewExpectedMTState(state)
+				expected.Step += 1
+				expected.StepsSinceLastContextSwitch += 1
+				expected.ActiveThread().Exited = true
+				expected.ActiveThread().ExitCode = exitCode
+				if c.shouldExitGlobally {
+					expected.Exited = true
+					expected.ExitCode = exitCode
+				}
 
-			// State transition
-			var err error
-			var stepWitness *mipsevm.StepWitness
-			stepWitness, err = goVm.Step(true)
-			require.NoError(t, err)
+				// State transition
+				var err error
+				var stepWitness *mipsevm.StepWitness
+				stepWitness, err = goVm.Step(true)
+				require.NoError(t, err)
 
-			// Validate post-state
-			expected.Validate(t, state)
-			testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
-		})
+				// Validate post-state
+				expected.Validate(t, state)
+				testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+			})
+		}
 	}
 }
 
@@ -449,41 +472,46 @@ func TestEVM_PopExitedThread(t *testing.T) {
 		{name: "traverse left, switch directions", traverseRight: false, activeStackThreadCount: 1, expectTraverseRightPostState: true},
 	}
 
-	for i, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			goVm, state, contracts := setup(t, i*133, nil)
-			mttestutil.SetupThreads(int64(i*222), state, c.traverseRight, c.activeStackThreadCount, 1)
-			step := state.Step
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		for i, c := range cases {
+			testName := fmt.Sprintf("%v (%v)", c.name, ver.Name)
+			t.Run(testName, func(t *testing.T) {
+				goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(i*133)))
+				state := mttestutil.GetMtState(t, goVm)
+				mttestutil.SetupThreads(int64(i*222), state, c.traverseRight, c.activeStackThreadCount, 1)
+				step := state.Step
 
-			// Setup thread to be dropped
-			threadToPop := state.GetCurrentThread()
-			threadToPop.Exited = true
-			threadToPop.ExitCode = 1
+				// Setup thread to be dropped
+				threadToPop := state.GetCurrentThread()
+				threadToPop.Exited = true
+				threadToPop.ExitCode = 1
 
-			// Set up expectations
-			expected := mttestutil.NewExpectedMTState(state)
-			expected.Step += 1
-			expected.ActiveThreadId = mttestutil.FindNextThreadExcluding(state, threadToPop.ThreadId).ThreadId
-			expected.StepsSinceLastContextSwitch = 0
-			expected.ThreadCount -= 1
-			expected.TraverseRight = c.expectTraverseRightPostState
-			expected.Thread(threadToPop.ThreadId).Dropped = true
-			if c.traverseRight {
-				expected.RightStackSize -= 1
-			} else {
-				expected.LeftStackSize -= 1
-			}
+				// Set up expectations
+				expected := mttestutil.NewExpectedMTState(state)
+				expected.Step += 1
+				expected.ActiveThreadId = mttestutil.FindNextThreadExcluding(state, threadToPop.ThreadId).ThreadId
+				expected.StepsSinceLastContextSwitch = 0
+				expected.ThreadCount -= 1
+				expected.TraverseRight = c.expectTraverseRightPostState
+				expected.Thread(threadToPop.ThreadId).Dropped = true
+				if c.traverseRight {
+					expected.RightStackSize -= 1
+				} else {
+					expected.LeftStackSize -= 1
+				}
 
-			// State transition
-			var err error
-			var stepWitness *mipsevm.StepWitness
-			stepWitness, err = goVm.Step(true)
-			require.NoError(t, err)
+				// State transition
+				var err error
+				var stepWitness *mipsevm.StepWitness
+				stepWitness, err = goVm.Step(true)
+				require.NoError(t, err)
 
-			// Validate post-state
-			expected.Validate(t, state)
-			testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
-		})
+				// Validate post-state
+				expected.Validate(t, state)
+				testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+			})
+		}
 	}
 }
 
@@ -510,45 +538,50 @@ func TestEVM_SysFutex_WaitPrivate(t *testing.T) {
 		{name: "memory mismatch w timeout", addressParam: 0xFF_FF_FF_FF_FF_FF_12_00, effAddr: 0xFF_FF_FF_FF_FF_FF_12_00, targetValue: 0xFF_FF_FF_F8, actualValue: 0xF8, timeout: 2000000, shouldFail: true},
 		{name: "memory mismatch w timeout, unaligned", addressParam: 0xFF_FF_FF_FF_FF_FF_12_0F, effAddr: 0xFF_FF_FF_FF_FF_FF_12_0C, targetValue: 0xFF_FF_FF_01, actualValue: 0xFF_FF_FF_02, timeout: 2000000, shouldFail: true},
 	}
-	for i, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			rand := testutil.NewRandHelper(int64(i * 33))
-			goVm, state, contracts := setup(t, i*1234, nil, testutil.WithPCAndNextPC(0x04))
-			step := state.GetStep()
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		for i, c := range cases {
+			testName := fmt.Sprintf("%v (%v)", c.name, ver.Name)
+			t.Run(testName, func(t *testing.T) {
+				rand := testutil.NewRandHelper(int64(i * 33))
+				goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(i*1234)), testutil.WithPCAndNextPC(0x04))
+				state := mttestutil.GetMtState(t, goVm)
+				step := state.GetStep()
 
-			testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
-			testutil.RandomizeWordAndSetUint32(state.GetMemory(), Word(c.effAddr), c.actualValue, int64(i+22))
-			state.GetRegistersRef()[2] = arch.SysFutex // Set syscall number
-			state.GetRegistersRef()[4] = Word(c.addressParam)
-			state.GetRegistersRef()[5] = exec.FutexWaitPrivate
-			// Randomize upper bytes of futex target
-			state.GetRegistersRef()[6] = (rand.Word() & ^Word(0xFF_FF_FF_FF)) | Word(c.targetValue)
-			state.GetRegistersRef()[7] = Word(c.timeout)
+				testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
+				testutil.RandomizeWordAndSetUint32(state.GetMemory(), Word(c.effAddr), c.actualValue, int64(i+22))
+				state.GetRegistersRef()[2] = arch.SysFutex // Set syscall number
+				state.GetRegistersRef()[4] = Word(c.addressParam)
+				state.GetRegistersRef()[5] = exec.FutexWaitPrivate
+				// Randomize upper bytes of futex target
+				state.GetRegistersRef()[6] = (rand.Word() & ^Word(0xFF_FF_FF_FF)) | Word(c.targetValue)
+				state.GetRegistersRef()[7] = Word(c.timeout)
 
-			// Setup expectations
-			expected := mttestutil.NewExpectedMTState(state)
-			expected.Step += 1
-			expected.ActiveThread().PC = state.GetCpu().NextPC
-			expected.ActiveThread().NextPC = state.GetCpu().NextPC + 4
-			if c.shouldFail {
-				expected.StepsSinceLastContextSwitch += 1
-				expected.ActiveThread().Registers[2] = exec.SysErrorSignal
-				expected.ActiveThread().Registers[7] = exec.MipsEAGAIN
-			} else {
-				// Return empty result and preempt thread
-				expected.ActiveThread().Registers[2] = 0
-				expected.ActiveThread().Registers[7] = 0
-				expected.ExpectPreemption(state)
-			}
+				// Setup expectations
+				expected := mttestutil.NewExpectedMTState(state)
+				expected.Step += 1
+				expected.ActiveThread().PC = state.GetCpu().NextPC
+				expected.ActiveThread().NextPC = state.GetCpu().NextPC + 4
+				if c.shouldFail {
+					expected.StepsSinceLastContextSwitch += 1
+					expected.ActiveThread().Registers[2] = exec.SysErrorSignal
+					expected.ActiveThread().Registers[7] = exec.MipsEAGAIN
+				} else {
+					// Return empty result and preempt thread
+					expected.ActiveThread().Registers[2] = 0
+					expected.ActiveThread().Registers[7] = 0
+					expected.ExpectPreemption(state)
+				}
 
-			// State transition
-			stepWitness, err := goVm.Step(true)
-			require.NoError(t, err)
+				// State transition
+				stepWitness, err := goVm.Step(true)
+				require.NoError(t, err)
 
-			// Validate post-state
-			expected.Validate(t, state)
-			testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
-		})
+				// Validate post-state
+				expected.Validate(t, state)
+				testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+			})
+		}
 	}
 }
 
@@ -578,34 +611,38 @@ func TestEVM_SysFutex_WakePrivate(t *testing.T) {
 		{name: "Traverse left, single thread", addressParam: 0xFF_FF_FF_FF_FF_FF_67_88, effAddr: 0xFF_FF_FF_FF_FF_FF_67_88, activeThreadCount: 1, inactiveThreadCount: 0, traverseRight: false},
 		{name: "Traverse left, single thread, unaligned", addressParam: 0xFF_FF_FF_FF_FF_FF_67_89, effAddr: 0xFF_FF_FF_FF_FF_FF_67_88, activeThreadCount: 1, inactiveThreadCount: 0, traverseRight: false},
 	}
-	for i, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			goVm, state, contracts := setup(t, i*1122, nil)
-			mttestutil.SetupThreads(int64(i*2244), state, c.traverseRight, c.activeThreadCount, c.inactiveThreadCount)
-			step := state.Step
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		for i, c := range cases {
+			testName := fmt.Sprintf("%v (%v)", c.name, ver.Name)
+			t.Run(testName, func(t *testing.T) {
+				goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(i*1122)))
+				state := mttestutil.GetMtState(t, goVm)
+				mttestutil.SetupThreads(int64(i*2244), state, c.traverseRight, c.activeThreadCount, c.inactiveThreadCount)
+				step := state.Step
 
-			testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
-			state.GetRegistersRef()[2] = arch.SysFutex // Set syscall number
-			state.GetRegistersRef()[4] = Word(c.addressParam)
-			state.GetRegistersRef()[5] = exec.FutexWakePrivate
+				testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
+				state.GetRegistersRef()[2] = arch.SysFutex // Set syscall number
+				state.GetRegistersRef()[4] = Word(c.addressParam)
+				state.GetRegistersRef()[5] = exec.FutexWakePrivate
 
-			// Set up post-state expectations
-			expected := mttestutil.NewExpectedMTState(state)
-			expected.ExpectStep()
-			expected.ActiveThread().Registers[2] = 0
-			expected.ActiveThread().Registers[7] = 0
-			expected.ExpectPreemption(state)
+				// Set up post-state expectations
+				expected := mttestutil.NewExpectedMTState(state)
+				expected.ExpectStep()
+				expected.ActiveThread().Registers[2] = 0
+				expected.ActiveThread().Registers[7] = 0
+				expected.ExpectPreemption(state)
 
-			// State transition
-			stepWitness, err := goVm.Step(true)
-			require.NoError(t, err)
+				// State transition
+				stepWitness, err := goVm.Step(true)
+				require.NoError(t, err)
 
-			// Validate post-state
-			expected.Validate(t, state)
-			testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
-		})
+				// Validate post-state
+				expected.Validate(t, state)
+				testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+			})
+		}
 	}
-
 }
 
 func TestEVM_SysFutex_UnsupportedOp(t *testing.T) {
@@ -654,34 +691,39 @@ func TestEVM_SysFutex_UnsupportedOp(t *testing.T) {
 		"FUTEX_CMP_REQUEUE_PI_PRIVATE":  (FUTEX_CMP_REQUEUE_PI | FUTEX_PRIVATE_FLAG),
 	}
 
-	for name, op := range unsupportedFutexOps {
-		t.Run(name, func(t *testing.T) {
-			goVm, state, contracts := setup(t, int(op), nil)
-			step := state.GetStep()
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		for name, op := range unsupportedFutexOps {
+			testName := fmt.Sprintf("%v (%v)", name, ver.Name)
+			t.Run(testName, func(t *testing.T) {
+				goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(op)))
+				state := mttestutil.GetMtState(t, goVm)
+				step := state.GetStep()
 
-			testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
-			state.GetRegistersRef()[2] = arch.SysFutex // Set syscall number
-			state.GetRegistersRef()[5] = op
+				testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
+				state.GetRegistersRef()[2] = arch.SysFutex // Set syscall number
+				state.GetRegistersRef()[5] = op
 
-			// Setup expectations
-			expected := mttestutil.NewExpectedMTState(state)
-			expected.Step += 1
-			expected.StepsSinceLastContextSwitch += 1
-			expected.ActiveThread().PC = state.GetCpu().NextPC
-			expected.ActiveThread().NextPC = state.GetCpu().NextPC + 4
-			expected.ActiveThread().Registers[2] = exec.SysErrorSignal
-			expected.ActiveThread().Registers[7] = exec.MipsEINVAL
+				// Setup expectations
+				expected := mttestutil.NewExpectedMTState(state)
+				expected.Step += 1
+				expected.StepsSinceLastContextSwitch += 1
+				expected.ActiveThread().PC = state.GetCpu().NextPC
+				expected.ActiveThread().NextPC = state.GetCpu().NextPC + 4
+				expected.ActiveThread().Registers[2] = exec.SysErrorSignal
+				expected.ActiveThread().Registers[7] = exec.MipsEINVAL
 
-			// State transition
-			var err error
-			var stepWitness *mipsevm.StepWitness
-			stepWitness, err = goVm.Step(true)
-			require.NoError(t, err)
+				// State transition
+				var err error
+				var stepWitness *mipsevm.StepWitness
+				stepWitness, err = goVm.Step(true)
+				require.NoError(t, err)
 
-			// Validate post-state
-			expected.Validate(t, state)
-			testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
-		})
+				// Validate post-state
+				expected.Validate(t, state)
+				testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+			})
+		}
 	}
 }
 
@@ -706,84 +748,101 @@ func runPreemptSyscall(t *testing.T, syscallName string, syscallNum uint32) {
 		{name: "Do not change directions", activeThreads: 3, inactiveThreads: 0},
 	}
 
-	for i, c := range cases {
-		for _, traverseRight := range []bool{true, false} {
-			testName := fmt.Sprintf("%v: %v (traverseRight = %v)", syscallName, c.name, traverseRight)
-			t.Run(testName, func(t *testing.T) {
-				goVm, state, contracts := setup(t, i*789, nil)
-				mttestutil.SetupThreads(int64(i*3259), state, traverseRight, c.activeThreads, c.inactiveThreads)
+	versions := GetMultiThreadedTestCases(t)
+	for _, ver := range versions {
+		for i, c := range cases {
+			for _, traverseRight := range []bool{true, false} {
+				testName := fmt.Sprintf("%v: %v (vm = %v, traverseRight = %v)", syscallName, c.name, ver.Name, traverseRight)
+				t.Run(testName, func(t *testing.T) {
+					goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(i*789)))
+					state := mttestutil.GetMtState(t, goVm)
+					mttestutil.SetupThreads(int64(i*3259), state, traverseRight, c.activeThreads, c.inactiveThreads)
 
-				testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
-				state.GetRegistersRef()[2] = Word(syscallNum) // Set syscall number
-				step := state.Step
+					testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
+					state.GetRegistersRef()[2] = Word(syscallNum) // Set syscall number
+					step := state.Step
 
-				// Set up post-state expectations
-				expected := mttestutil.NewExpectedMTState(state)
-				expected.ExpectStep()
-				expected.ExpectPreemption(state)
-				expected.PrestateActiveThread().Registers[2] = 0
-				expected.PrestateActiveThread().Registers[7] = 0
+					// Set up post-state expectations
+					expected := mttestutil.NewExpectedMTState(state)
+					expected.ExpectStep()
+					expected.ExpectPreemption(state)
+					expected.PrestateActiveThread().Registers[2] = 0
+					expected.PrestateActiveThread().Registers[7] = 0
 
-				// State transition
-				var err error
-				var stepWitness *mipsevm.StepWitness
-				stepWitness, err = goVm.Step(true)
-				require.NoError(t, err)
+					// State transition
+					var err error
+					var stepWitness *mipsevm.StepWitness
+					stepWitness, err = goVm.Step(true)
+					require.NoError(t, err)
 
-				// Validate post-state
-				expected.Validate(t, state)
-				testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
-			})
+					// Validate post-state
+					expected.Validate(t, state)
+					testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+				})
+			}
 		}
 	}
 }
 
 func TestEVM_SysOpen(t *testing.T) {
-	goVm, state, contracts := setup(t, 5512, nil)
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		t.Run(ver.Name, func(t *testing.T) {
+			goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(5512)))
+			state := mttestutil.GetMtState(t, goVm)
 
-	testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
-	state.GetRegistersRef()[2] = arch.SysOpen // Set syscall number
-	step := state.Step
+			testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
+			state.GetRegistersRef()[2] = arch.SysOpen // Set syscall number
+			step := state.Step
 
-	// Set up post-state expectations
-	expected := mttestutil.NewExpectedMTState(state)
-	expected.ExpectStep()
-	expected.ActiveThread().Registers[2] = exec.SysErrorSignal
-	expected.ActiveThread().Registers[7] = exec.MipsEBADF
+			// Set up post-state expectations
+			expected := mttestutil.NewExpectedMTState(state)
+			expected.ExpectStep()
+			expected.ActiveThread().Registers[2] = exec.SysErrorSignal
+			expected.ActiveThread().Registers[7] = exec.MipsEBADF
 
-	// State transition
-	var err error
-	var stepWitness *mipsevm.StepWitness
-	stepWitness, err = goVm.Step(true)
-	require.NoError(t, err)
+			// State transition
+			var err error
+			var stepWitness *mipsevm.StepWitness
+			stepWitness, err = goVm.Step(true)
+			require.NoError(t, err)
 
-	// Validate post-state
-	expected.Validate(t, state)
-	testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
+			// Validate post-state
+			expected.Validate(t, state)
+			testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+		})
+	}
+
 }
 
 func TestEVM_SysGetPID(t *testing.T) {
-	goVm, state, contracts := setup(t, 1929, nil)
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		t.Run(ver.Name, func(t *testing.T) {
+			goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(1929)))
+			state := mttestutil.GetMtState(t, goVm)
 
-	testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
-	state.GetRegistersRef()[2] = arch.SysGetpid // Set syscall number
-	step := state.Step
+			testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
+			state.GetRegistersRef()[2] = arch.SysGetpid // Set syscall number
+			step := state.Step
 
-	// Set up post-state expectations
-	expected := mttestutil.NewExpectedMTState(state)
-	expected.ExpectStep()
-	expected.ActiveThread().Registers[2] = 0
-	expected.ActiveThread().Registers[7] = 0
+			// Set up post-state expectations
+			expected := mttestutil.NewExpectedMTState(state)
+			expected.ExpectStep()
+			expected.ActiveThread().Registers[2] = 0
+			expected.ActiveThread().Registers[7] = 0
 
-	// State transition
-	var err error
-	var stepWitness *mipsevm.StepWitness
-	stepWitness, err = goVm.Step(true)
-	require.NoError(t, err)
+			// State transition
+			var err error
+			var stepWitness *mipsevm.StepWitness
+			stepWitness, err = goVm.Step(true)
+			require.NoError(t, err)
 
-	// Validate post-state
-	expected.Validate(t, state)
-	testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
+			// Validate post-state
+			expected.Validate(t, state)
+			testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+		})
+	}
 }
 
 func TestEVM_SysClockGettimeMonotonic(t *testing.T) {
@@ -823,93 +882,103 @@ func testEVM_SysClockGettime(t *testing.T, clkid Word) {
 		{"aligned timespec address", 0x1000},
 		{"unaligned timespec address", 0x1003},
 	}
-	for i, c := range cases {
-		for _, v := range llVariations {
-			tName := fmt.Sprintf("%v (%v)", c.name, v.name)
-			t.Run(tName, func(t *testing.T) {
-				goVm, state, contracts := setup(t, 2101, nil)
-				mttestutil.InitializeSingleThread(2101+i, state, i%2 == 1)
-				effAddr := c.timespecAddr & arch.AddressMask
-				effAddr2 := effAddr + arch.WordSizeBytes
-				step := state.Step
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		for i, c := range cases {
+			for _, llVar := range llVariations {
+				tName := fmt.Sprintf("%v (%v,%v)", c.name, ver.Name, llVar.name)
+				t.Run(tName, func(t *testing.T) {
+					goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(2101)))
+					state := mttestutil.GetMtState(t, goVm)
+					mttestutil.InitializeSingleThread(2101+i, state, i%2 == 1)
+					effAddr := c.timespecAddr & arch.AddressMask
+					effAddr2 := effAddr + arch.WordSizeBytes
+					step := state.Step
 
-				// Define LL-related params
-				var llAddress, llOwnerThread Word
-				if v.matchEffAddr {
-					llAddress = effAddr
-				} else if v.matchEffAddr2 {
-					llAddress = effAddr2
-				} else {
-					llAddress = effAddr2 + 8
-				}
-				if v.matchThreadId {
-					llOwnerThread = state.GetCurrentThread().ThreadId
-				} else {
-					llOwnerThread = state.GetCurrentThread().ThreadId + 1
-				}
+					// Define LL-related params
+					var llAddress, llOwnerThread Word
+					if llVar.matchEffAddr {
+						llAddress = effAddr
+					} else if llVar.matchEffAddr2 {
+						llAddress = effAddr2
+					} else {
+						llAddress = effAddr2 + 8
+					}
+					if llVar.matchThreadId {
+						llOwnerThread = state.GetCurrentThread().ThreadId
+					} else {
+						llOwnerThread = state.GetCurrentThread().ThreadId + 1
+					}
 
-				testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
-				state.GetRegistersRef()[2] = arch.SysClockGetTime // Set syscall number
-				state.GetRegistersRef()[4] = clkid                // a0
-				state.GetRegistersRef()[5] = c.timespecAddr       // a1
-				state.LLReservationStatus = v.llReservationStatus
-				state.LLAddress = llAddress
-				state.LLOwnerThread = llOwnerThread
+					testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
+					state.GetRegistersRef()[2] = arch.SysClockGetTime // Set syscall number
+					state.GetRegistersRef()[4] = clkid                // a0
+					state.GetRegistersRef()[5] = c.timespecAddr       // a1
+					state.LLReservationStatus = llVar.llReservationStatus
+					state.LLAddress = llAddress
+					state.LLOwnerThread = llOwnerThread
 
-				expected := mttestutil.NewExpectedMTState(state)
-				expected.ExpectStep()
-				expected.ActiveThread().Registers[2] = 0
-				expected.ActiveThread().Registers[7] = 0
-				next := state.Step + 1
-				var secs, nsecs Word
-				if clkid == exec.ClockGettimeMonotonicFlag {
-					secs = Word(next / exec.HZ)
-					nsecs = Word((next % exec.HZ) * (1_000_000_000 / exec.HZ))
-				}
-				expected.ExpectMemoryWordWrite(effAddr, secs)
-				expected.ExpectMemoryWordWrite(effAddr2, nsecs)
-				if v.shouldClearReservation {
-					expected.LLReservationStatus = multithreaded.LLStatusNone
-					expected.LLAddress = 0
-					expected.LLOwnerThread = 0
-				}
+					expected := mttestutil.NewExpectedMTState(state)
+					expected.ExpectStep()
+					expected.ActiveThread().Registers[2] = 0
+					expected.ActiveThread().Registers[7] = 0
+					next := state.Step + 1
+					var secs, nsecs Word
+					if clkid == exec.ClockGettimeMonotonicFlag {
+						secs = Word(next / exec.HZ)
+						nsecs = Word((next % exec.HZ) * (1_000_000_000 / exec.HZ))
+					}
+					expected.ExpectMemoryWordWrite(effAddr, secs)
+					expected.ExpectMemoryWordWrite(effAddr2, nsecs)
+					if llVar.shouldClearReservation {
+						expected.LLReservationStatus = multithreaded.LLStatusNone
+						expected.LLAddress = 0
+						expected.LLOwnerThread = 0
+					}
 
-				var err error
-				var stepWitness *mipsevm.StepWitness
-				stepWitness, err = goVm.Step(true)
-				require.NoError(t, err)
+					var err error
+					var stepWitness *mipsevm.StepWitness
+					stepWitness, err = goVm.Step(true)
+					require.NoError(t, err)
 
-				// Validate post-state
-				expected.Validate(t, state)
-				testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
-			})
+					// Validate post-state
+					expected.Validate(t, state)
+					testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+				})
+			}
 		}
 	}
 }
 
 func TestEVM_SysClockGettimeNonMonotonic(t *testing.T) {
-	goVm, state, contracts := setup(t, 2101, nil)
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		t.Run(ver.Name, func(t *testing.T) {
+			goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(2101)))
+			state := mttestutil.GetMtState(t, goVm)
 
-	timespecAddr := Word(0x1000)
-	testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
-	state.GetRegistersRef()[2] = arch.SysClockGetTime // Set syscall number
-	state.GetRegistersRef()[4] = 0xDEAD               // a0 - invalid clockid
-	state.GetRegistersRef()[5] = timespecAddr         // a1
-	step := state.Step
+			timespecAddr := Word(0x1000)
+			testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
+			state.GetRegistersRef()[2] = arch.SysClockGetTime // Set syscall number
+			state.GetRegistersRef()[4] = 0xDEAD               // a0 - invalid clockid
+			state.GetRegistersRef()[5] = timespecAddr         // a1
+			step := state.Step
 
-	expected := mttestutil.NewExpectedMTState(state)
-	expected.ExpectStep()
-	expected.ActiveThread().Registers[2] = exec.SysErrorSignal
-	expected.ActiveThread().Registers[7] = exec.MipsEINVAL
+			expected := mttestutil.NewExpectedMTState(state)
+			expected.ExpectStep()
+			expected.ActiveThread().Registers[2] = exec.SysErrorSignal
+			expected.ActiveThread().Registers[7] = exec.MipsEINVAL
 
-	var err error
-	var stepWitness *mipsevm.StepWitness
-	stepWitness, err = goVm.Step(true)
-	require.NoError(t, err)
+			var err error
+			var stepWitness *mipsevm.StepWitness
+			stepWitness, err = goVm.Step(true)
+			require.NoError(t, err)
 
-	// Validate post-state
-	expected.Validate(t, state)
-	testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
+			// Validate post-state
+			expected.Validate(t, state)
+			testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+		})
+	}
 }
 
 var NoopSyscalls = map[string]uint32{
@@ -951,7 +1020,7 @@ var NoopSyscalls = map[string]uint32{
 
 func TestEVM_NoopSyscall32(t *testing.T) {
 	testutil.Cannon32OnlyTest(t, "These tests are fully covered for 64-bits in TestEVM_NoopSyscall64")
-	testNoopSyscall(t, GetMultiThreadedTestCase(t, versions.VersionMultiThreaded), NoopSyscalls)
+	testNoopSyscall(t, GetMultiThreadedTestCase(t, versions.VersionMultiThreaded_v2), NoopSyscalls)
 }
 
 func TestEVM_UnsupportedSyscall32(t *testing.T) {
@@ -989,18 +1058,22 @@ func TestEVM_EmptyThreadStacks(t *testing.T) {
 	// Generate proof variations
 	proofVariations := GenerateEmptyThreadProofVariations(t)
 
-	for i, c := range cases {
-		for _, proofCase := range proofVariations {
-			testName := fmt.Sprintf("%v (proofCase=%v)", c.name, proofCase.Name)
-			t.Run(testName, func(t *testing.T) {
-				goVm, state, contracts := setup(t, i*123, nil)
-				mttestutil.SetupThreads(int64(i*123), state, c.traverseRight, 0, c.otherStackSize)
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		for i, c := range cases {
+			for _, proofCase := range proofVariations {
+				testName := fmt.Sprintf("%v (vm=%v,proofCase=%v)", c.name, ver.Name, proofCase.Name)
+				t.Run(testName, func(t *testing.T) {
+					goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(i*123)))
+					state := mttestutil.GetMtState(t, goVm)
+					mttestutil.SetupThreads(int64(i*123), state, c.traverseRight, 0, c.otherStackSize)
 
-				require.PanicsWithValue(t, "Active thread stack is empty", func() { _, _ = goVm.Step(false) })
+					require.PanicsWithValue(t, "Active thread stack is empty", func() { _, _ = goVm.Step(false) })
 
-				errorMessage := "active thread stack is empty"
-				testutil.AssertEVMReverts(t, state, contracts, tracer, proofCase.Proof, testutil.CreateErrorStringMatcher(errorMessage))
-			})
+					errorMessage := "active thread stack is empty"
+					testutil.AssertEVMReverts(t, state, ver.Contracts, tracer, proofCase.Proof, testutil.CreateErrorStringMatcher(errorMessage))
+				})
+			}
 		}
 	}
 }
@@ -1015,40 +1088,44 @@ func TestEVM_NormalTraversal_Full(t *testing.T) {
 		{"3 threads", 3},
 	}
 
-	for i, c := range cases {
-		for _, traverseRight := range []bool{true, false} {
-			testName := fmt.Sprintf("%v (traverseRight = %v)", c.name, traverseRight)
-			t.Run(testName, func(t *testing.T) {
-				// Setup
-				goVm, state, contracts := setup(t, i*789, nil)
-				mttestutil.SetupThreads(int64(i*2947), state, traverseRight, c.threadCount, 0)
-				step := state.Step
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		for i, c := range cases {
+			for _, traverseRight := range []bool{true, false} {
+				testName := fmt.Sprintf("%v (vm = %v, traverseRight = %v)", c.name, ver.Name, traverseRight)
+				t.Run(testName, func(t *testing.T) {
+					// Setup
+					goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(i*789)))
+					state := mttestutil.GetMtState(t, goVm)
+					mttestutil.SetupThreads(int64(i*2947), state, traverseRight, c.threadCount, 0)
+					step := state.Step
 
-				// Loop through all the threads to get back to the starting state
-				iterations := c.threadCount * 2
-				for i := 0; i < iterations; i++ {
-					// Set up thread to yield
-					testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
-					state.GetRegistersRef()[2] = Word(arch.SysSchedYield)
+					// Loop through all the threads to get back to the starting state
+					iterations := c.threadCount * 2
+					for i := 0; i < iterations; i++ {
+						// Set up thread to yield
+						testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
+						state.GetRegistersRef()[2] = Word(arch.SysSchedYield)
 
-					// Set up post-state expectations
-					expected := mttestutil.NewExpectedMTState(state)
-					expected.ActiveThread().Registers[2] = 0
-					expected.ActiveThread().Registers[7] = 0
-					expected.ExpectStep()
-					expected.ExpectPreemption(state)
+						// Set up post-state expectations
+						expected := mttestutil.NewExpectedMTState(state)
+						expected.ActiveThread().Registers[2] = 0
+						expected.ActiveThread().Registers[7] = 0
+						expected.ExpectStep()
+						expected.ExpectPreemption(state)
 
-					// State transition
-					var err error
-					var stepWitness *mipsevm.StepWitness
-					stepWitness, err = goVm.Step(true)
-					require.NoError(t, err)
+						// State transition
+						var err error
+						var stepWitness *mipsevm.StepWitness
+						stepWitness, err = goVm.Step(true)
+						require.NoError(t, err)
 
-					// Validate post-state
-					expected.Validate(t, state)
-					testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
-				}
-			})
+						// Validate post-state
+						expected.Validate(t, state)
+						testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+					}
+				})
+			}
 		}
 	}
 }
@@ -1064,50 +1141,41 @@ func TestEVM_SchedQuantumThreshold(t *testing.T) {
 		{name: "beyond threshold", stepsSinceLastContextSwitch: exec.SchedQuantum + 1, shouldPreempt: true},
 	}
 
-	for i, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			goVm, state, contracts := setup(t, i*789, nil)
-			// Setup basic getThreadId syscall instruction
-			testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
-			state.GetRegistersRef()[2] = arch.SysGetTID // Set syscall number
-			state.StepsSinceLastContextSwitch = c.stepsSinceLastContextSwitch
-			step := state.Step
+	vmVersions := GetMultiThreadedTestCases(t)
+	for _, ver := range vmVersions {
+		for i, c := range cases {
+			testName := fmt.Sprintf("%v (%v)", c.name, ver.Name)
+			t.Run(testName, func(t *testing.T) {
+				goVm := ver.VMFactory(nil, os.Stdout, os.Stderr, testutil.CreateLogger(), testutil.WithRandomization(int64(i*789)))
+				state := mttestutil.GetMtState(t, goVm)
+				// Setup basic getThreadId syscall instruction
+				testutil.StoreInstruction(state.Memory, state.GetPC(), syscallInsn)
+				state.GetRegistersRef()[2] = arch.SysGetTID // Set syscall number
+				state.StepsSinceLastContextSwitch = c.stepsSinceLastContextSwitch
+				step := state.Step
 
-			// Set up post-state expectations
-			expected := mttestutil.NewExpectedMTState(state)
-			if c.shouldPreempt {
-				expected.Step += 1
-				expected.ExpectPreemption(state)
-			} else {
-				// Otherwise just expect a normal step
-				expected.ExpectStep()
-				expected.ActiveThread().Registers[2] = state.GetCurrentThread().ThreadId
-				expected.ActiveThread().Registers[7] = 0
-			}
+				// Set up post-state expectations
+				expected := mttestutil.NewExpectedMTState(state)
+				if c.shouldPreempt {
+					expected.Step += 1
+					expected.ExpectPreemption(state)
+				} else {
+					// Otherwise just expect a normal step
+					expected.ExpectStep()
+					expected.ActiveThread().Registers[2] = state.GetCurrentThread().ThreadId
+					expected.ActiveThread().Registers[7] = 0
+				}
 
-			// State transition
-			var err error
-			var stepWitness *mipsevm.StepWitness
-			stepWitness, err = goVm.Step(true)
-			require.NoError(t, err)
+				// State transition
+				var err error
+				var stepWitness *mipsevm.StepWitness
+				stepWitness, err = goVm.Step(true)
+				require.NoError(t, err)
 
-			// Validate post-state
-			expected.Validate(t, state)
-			testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), contracts)
-		})
+				// Validate post-state
+				expected.Validate(t, state)
+				testutil.ValidateEVM(t, stepWitness, step, goVm, multithreaded.GetStateHashFn(), ver.Contracts)
+			})
+		}
 	}
-}
-
-func setup(t require.TestingT, randomSeed int, preimageOracle mipsevm.PreimageOracle, opts ...testutil.StateOption) (mipsevm.FPVM, *multithreaded.State, *testutil.ContractMetadata) {
-	cases := GetMultiThreadedTestCases(t)
-	require.NotZero(t, len(cases), "must have at least one supported multithreaded test case")
-	// Use the most recent supported version
-	return setupWithTestCase(t, cases[len(cases)-1], randomSeed, preimageOracle, opts...)
-}
-
-func setupWithTestCase(t require.TestingT, v VersionedVMTestCase, randomSeed int, preimageOracle mipsevm.PreimageOracle, opts ...testutil.StateOption) (mipsevm.FPVM, *multithreaded.State, *testutil.ContractMetadata) {
-	allOpts := append([]testutil.StateOption{testutil.WithRandomization(int64(randomSeed))}, opts...)
-	vm := v.VMFactory(preimageOracle, os.Stdout, os.Stderr, testutil.CreateLogger(), allOpts...)
-	state := mttestutil.GetMtState(t, vm)
-	return vm, state, v.Contracts
 }
