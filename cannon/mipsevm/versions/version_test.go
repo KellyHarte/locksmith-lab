@@ -1,6 +1,7 @@
 package versions
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -49,5 +50,32 @@ func TestIsSupported(t *testing.T) {
 			actual := IsSupported(tc.input)
 			require.Equal(t, tc.expected, actual)
 		})
+	}
+}
+
+func TestGetCurrentVersion(t *testing.T) {
+	require.True(t, IsSupported(int(GetCurrentVersion())))
+}
+
+func TestGetExperimentalVersion(t *testing.T) {
+	require.True(t, IsSupported(int(GetExperimentalVersion())))
+
+	require.GreaterOrEqual(t, GetExperimentalVersion(), GetCurrentVersion())
+
+	// Experimental version should be equal to the latest version
+	expectedValue := slices.Max(StateVersionTypes)
+	require.Equal(t, expectedValue, GetExperimentalVersion())
+}
+
+func TestStateVersionTypes(t *testing.T) {
+	// Versions should be in ascending order
+	lastVersion := StateVersion(0)
+	for i, version := range StateVersionTypes {
+		if i == 0 {
+			require.GreaterOrEqual(t, version, lastVersion)
+		} else {
+			require.Greater(t, version, lastVersion)
+		}
+		lastVersion = version
 	}
 }
