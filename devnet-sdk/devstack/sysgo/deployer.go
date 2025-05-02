@@ -227,13 +227,13 @@ func (wb *worldBuilder) buildL2DeploymentOutputs() {
 	for _, ch := range wb.output.Chains {
 		chainID := eth.ChainIDFromBytes32(ch.ID)
 		wb.outL2Deployment[chainID] = &L2Deployment{
-			systemConfigProxyAddr:   ch.SystemConfigProxyAddress,
-			disputeGameFactoryProxy: ch.DisputeGameFactoryProxyAddress,
+			systemConfigProxyAddr:   ch.SystemConfigProxy,
+			disputeGameFactoryProxy: ch.DisputeGameFactoryProxy,
 		}
 	}
 	wb.outSuperchainDeployment = &SuperchainDeployment{
-		protocolVersionsAddr: wb.output.SuperchainDeployment.ProtocolVersionsProxyAddress,
-		superchainConfigAddr: wb.output.SuperchainDeployment.SuperchainConfigProxyAddress,
+		protocolVersionsAddr: wb.output.SuperchainDeployment.ProtocolVersionsProxy,
+		superchainConfigAddr: wb.output.SuperchainDeployment.SuperchainConfigProxy,
 	}
 }
 
