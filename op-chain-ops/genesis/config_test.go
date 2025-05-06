@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -87,6 +88,17 @@ func TestCanyonTimeOffset(t *testing.T) {
 		},
 	}
 	require.Equal(t, uint64(1234+1500), *config.CanyonTime(1234))
+}
+
+func TestForksCantActivateAtSamePostGenesisBlock(t *testing.T) {
+	postGenesisOffset := uint64(1500)
+	config := &UpgradeScheduleDeployConfig{}
+	for _, fork := range config.forks() {
+		config.SetForkTimeOffset(rollup.ForkName(fork.Name), &postGenesisOffset)
+	}
+	err := config.Check(testlog.Logger(t, log.LevelDebug))
+	require.Error(t, err)
+	require.True(t, strings.Contains(err.Error(), "Forks in general cannot activate at the same post-Genesis block"))
 }
 
 // TestCopy will copy a DeployConfig and ensure that the copy is equal to the original.
