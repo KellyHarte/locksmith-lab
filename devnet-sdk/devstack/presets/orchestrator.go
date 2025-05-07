@@ -29,7 +29,7 @@ var lockedOrchestrator locks.RWValue[stack.Orchestrator]
 // DoMain runs M with the pre- and post-processing of tests,
 // to setup the default global orchestrator and global logger.
 // This will os.Exit(code) and not return.
-func DoMain(m *testing.M, opts ...stack.Option) {
+func DoMain(m *testing.M, opts ...stack.CommonOption) {
 	// nest the function, so we can defer-recover and defer-cleanup, before os.Exit
 	code := func() (errCode int) {
 		failed := new(atomic.Bool)
@@ -40,8 +40,8 @@ func DoMain(m *testing.M, opts ...stack.Option) {
 		}()
 		defer func() {
 			if x := recover(); x != nil {
+				debug.PrintStack()
 				_, _ = fmt.Fprintf(os.Stderr, "Panic during test Main: %v\n", x)
-				_, _ = fmt.Fprint(os.Stderr, "Stacktrace from panic: \n"+string(debug.Stack()))
 
 				failed.Store(true)
 			}
@@ -81,7 +81,7 @@ func DoMain(m *testing.M, opts ...stack.Option) {
 		// TODO(#15139): set log-level filter, reduce noise
 		//log.SetDefault(t.Log.New("logger", "global"))
 
-		initOrchestrator(ctx, p, opts...)
+		initOrchestrator(ctx, p, stack.Combine(opts...))
 
 		errCode = m.Run()
 		return
@@ -90,7 +90,7 @@ func DoMain(m *testing.M, opts ...stack.Option) {
 	os.Exit(code)
 }
 
-func initOrchestrator(ctx context.Context, p devtest.P, opts ...stack.Option) {
+func initOrchestrator(ctx context.Context, p devtest.P, opt stack.CommonOption) {
 	ctx, span := p.Tracer().Start(ctx, "initializing orchestrator")
 	defer span.End()
 
@@ -115,9 +115,7 @@ func initOrchestrator(ctx context.Context, p devtest.P, opts ...stack.Option) {
 	default:
 		p.Logger().Crit("Unknown devstack backend", "kind", kind)
 	}
-	for _, opt := range opts {
-		opt(lockedOrchestrator.Value)
-	}
+	stack.ApplyOptionLifecycle(opt, lockedOrchestrator.Value)
 }
 
 // Orchestrator returns the globally configured orchestrator.
