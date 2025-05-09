@@ -47,11 +47,11 @@ func WithAllLocalUnsafeHeadsAdvancedBy(blocks uint64) func(cfg *VerifySyncStatus
 // VerifySyncStatus performs assertions based on the supervisor's SyncStatus endpoint.
 func (s *Supervisor) VerifySyncStatus(opts ...func(config *VerifySyncStatusConfig)) {
 	cfg := applyOpts(VerifySyncStatusConfig{}, opts...)
-	initial := s.fetchSyncStatus()
+	initial := s.FetchSyncStatus()
 	ctx, cancel := context.WithTimeout(s.ctx, defaultTimeout)
 	defer cancel()
 	err := wait.For(ctx, 1*time.Second, func() (bool, error) {
-		status := s.fetchSyncStatus()
+		status := s.FetchSyncStatus()
 		s.require.Equalf(len(initial.Chains), len(status.Chains), "Expected %d chains in status but got %d", len(initial.Chains), len(status.Chains))
 		for chID, chStatus := range status.Chains {
 			chInitial := initial.Chains[chID]
@@ -67,7 +67,7 @@ func (s *Supervisor) VerifySyncStatus(opts ...func(config *VerifySyncStatusConfi
 	s.require.NoError(err, "Expected sync status not found")
 }
 
-func (s *Supervisor) fetchSyncStatus() eth.SupervisorSyncStatus {
+func (s *Supervisor) FetchSyncStatus() eth.SupervisorSyncStatus {
 	s.log.Debug("Fetching supervisor sync status")
 	ctx, cancel := context.WithTimeout(s.ctx, defaultTimeout)
 	defer cancel()
@@ -98,5 +98,5 @@ func (s *Supervisor) SafeBlockID(chainID eth.ChainID) eth.BlockID {
 	})
 	s.require.NoError(err, "Failed to fetch sync status")
 
-	return syncStatus.Chains[chainID].Safe
+	return syncStatus.Chains[chainID].CrossSafe
 }

@@ -2,6 +2,7 @@ package dsl
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
@@ -39,6 +40,32 @@ func (n *L2Network) Escape() stack.L2Network {
 	return n.inner
 }
 
+func (n *L2Network) CatchUpTo(o *L2Network) {
+	this := n.inner.L2ELNode(match.FirstL2EL)
+	other := o.inner.L2ELNode(match.FirstL2EL)
+
+	err := wait.For(n.ctx, 5*time.Second, func() (bool, error) {
+		a, err := this.EthClient().InfoByLabel(n.ctx, "latest")
+		if err != nil {
+			return false, err
+		}
+
+		b, err := other.EthClient().InfoByLabel(n.ctx, "latest")
+		if err != nil {
+			return false, err
+		}
+
+		eps := 6.0 // 6 seconds
+		if math.Abs(float64(a.Time()-b.Time())) > eps {
+			n.log.Warn("L2 networks too far off each other", n.String(), a.Time(), o.String(), b.Time())
+			return false, nil
+		}
+
+		return true, nil
+	})
+	n.require.NoError(err, "Expected to get latest block from L2 execution clients")
+}
+
 func (n *L2Network) WaitForBlock() {
 	l2_el := n.inner.L2ELNode(match.FirstL2EL)
 
@@ -47,7 +74,7 @@ func (n *L2Network) WaitForBlock() {
 
 	initialHash := initial.Hash()
 
-	err = wait.For(n.ctx, 500*time.Millisecond, func() (bool, error) {
+	err = wait.For(n.ctx, 1000*time.Millisecond, func() (bool, error) {
 		latest, err := l2_el.EthClient().InfoByLabel(n.ctx, "latest")
 		if err != nil {
 			return false, err
@@ -56,12 +83,12 @@ func (n *L2Network) WaitForBlock() {
 		newHash := latest.Hash()
 
 		if initialHash.Cmp(newHash) == 0 {
-			n.log.Info("Still same block detected", "initial_block_hash", initialHash, "new_block_hash", newHash)
+			n.log.Info("Still same block detected", "number", latest.NumberU64(), "chain", n.ChainID(), "initial_block_hash", initialHash, "new_block_hash", newHash)
 
 			return false, nil
 		}
 
-		n.log.Info("New block detected", "prev_block_hash", initialHash, "new_block_hash", newHash)
+		n.log.Info("New block detected", "chain", n.ChainID(), "prev_block_hash", initialHash, "new_block_hash", newHash, "time", latest.Time())
 		return true, nil
 	})
 	n.require.NoError(err, "Expected to get latest block from L2 execution client for comparison")
@@ -79,7 +106,10 @@ func (n *L2Network) PrintChain() {
 		ref, err := l2_el.EthClient().BlockRefByNumber(n.ctx, i)
 		n.require.NoError(err, "Expected to get block ref by number")
 
-		entries = append(entries, fmt.Sprintln("Number: ", ref.Number, "Hash: ", ref.Hash.Hex(), "Parent: ", ref.ParentID().Hash.Hex()))
+		l2blockref, err := l2_el.L2EthClient().L2BlockRefByHash(n.ctx, ref.Hash)
+		n.require.NoError(err, "Expected to get block ref by hash")
+
+		entries = append(entries, fmt.Sprintln("Time: ", ref.Time, "Number: ", ref.Number, "Hash: ", ref.Hash.Hex(), "Parent: ", ref.ParentID().Hash.Hex(), "L1 Origin: ", l2blockref.L1Origin))
 	}
 
 	syncStatus, err := l2_cl.RollupAPI().SyncStatus(n.ctx)
@@ -87,7 +117,7 @@ func (n *L2Network) PrintChain() {
 
 	entries = append(entries, spew.Sdump(syncStatus))
 
-	n.log.Info("Printing block hashes and parent hashes")
+	n.log.Info("Printing block hashes and parent hashes", "network", n.String(), "chain", n.ChainID())
 	spew.Dump(entries)
 }
 
