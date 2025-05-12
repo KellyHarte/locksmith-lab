@@ -58,14 +58,16 @@ func (o *Orchestrator) hydrateL2(net *descriptors.L2Chain, system stack.Extensib
 	o.hydrateL2ProxydMaybe(net, l2)
 
 	if faucet, ok := net.Services["faucet"]; ok {
-		for _, endpoint := range faucet.Endpoints {
-			endpoint.Path = fmt.Sprintf("chain/%s", l2.ChainID().String())
+		for _, instance := range faucet {
+			for _, endpoint := range instance.Endpoints {
+				endpoint.Path = fmt.Sprintf("chain/%s", l2.ChainID().String())
+			}
+			l2.AddFaucet(shim.NewFaucet(shim.FaucetConfig{
+				CommonConfig: commonConfig,
+				Client:       o.rpcClient(t, instance, RPCProtocol),
+				ID:           stack.FaucetID{Key: instance.Name, ChainID: l2.ChainID()},
+			}))
 		}
-		l2.AddFaucet(shim.NewFaucet(shim.FaucetConfig{
-			CommonConfig: commonConfig,
-			Client:       o.rpcClient(t, faucet, RPCProtocol),
-			ID:           stack.FaucetID{Key: faucet.Name, ChainID: l2.ChainID()},
-		}))
 	}
 
 	system.AddL2Network(l2)
@@ -125,19 +127,21 @@ func (o *Orchestrator) hydrateL2ProxydMaybe(net *descriptors.L2Chain, l2Net stac
 		return
 	}
 
-	l2Proxyd := shim.NewL2ELNode(shim.L2ELNodeConfig{
-		ELNodeConfig: shim.ELNodeConfig{
-			CommonConfig: shim.NewCommonConfig(l2Net.T()),
-			Client:       o.rpcClient(l2Net.T(), proxydService, HTTPProtocol),
-			ChainID:      l2ID.ChainID(),
-		},
-		ID: stack.L2ELNodeID{
-			Key:     proxydService.Name,
-			ChainID: l2ID.ChainID(),
-		},
-	})
-	l2Proxyd.SetLabel(match.LabelVendor, string(match.Proxyd))
-	l2Net.AddL2ELNode(l2Proxyd)
+	for _, instance := range proxydService {
+		l2Proxyd := shim.NewL2ELNode(shim.L2ELNodeConfig{
+			ELNodeConfig: shim.ELNodeConfig{
+				CommonConfig: shim.NewCommonConfig(l2Net.T()),
+				Client:       o.rpcClient(l2Net.T(), instance, HTTPProtocol),
+				ChainID:      l2ID.ChainID(),
+			},
+			ID: stack.L2ELNodeID{
+				Key:     instance.Name,
+				ChainID: l2ID.ChainID(),
+			},
+		})
+		l2Proxyd.SetLabel(match.LabelVendor, string(match.Proxyd))
+		l2Net.AddL2ELNode(l2Proxyd)
+	}
 }
 
 func (o *Orchestrator) hydrateBatcherMaybe(net *descriptors.L2Chain, l2Net stack.ExtensibleL2Network) {
@@ -151,14 +155,16 @@ func (o *Orchestrator) hydrateBatcherMaybe(net *descriptors.L2Chain, l2Net stack
 		return
 	}
 
-	l2Net.AddL2Batcher(shim.NewL2Batcher(shim.L2BatcherConfig{
-		CommonConfig: shim.NewCommonConfig(l2Net.T()),
-		ID: stack.L2BatcherID{
-			Key:     batcherService.Name,
-			ChainID: l2ID.ChainID(),
-		},
-		Client: o.rpcClient(l2Net.T(), batcherService, HTTPProtocol),
-	}))
+	for _, instance := range batcherService {
+		l2Net.AddL2Batcher(shim.NewL2Batcher(shim.L2BatcherConfig{
+			CommonConfig: shim.NewCommonConfig(l2Net.T()),
+			ID: stack.L2BatcherID{
+				Key:     instance.Name,
+				ChainID: l2ID.ChainID(),
+			},
+			Client: o.rpcClient(l2Net.T(), instance, HTTPProtocol),
+		}))
+	}
 }
 
 func (o *Orchestrator) hydrateProposerMaybe(net *descriptors.L2Chain, l2Net stack.ExtensibleL2Network) {
@@ -172,14 +178,16 @@ func (o *Orchestrator) hydrateProposerMaybe(net *descriptors.L2Chain, l2Net stac
 		return
 	}
 
-	l2Net.AddL2Proposer(shim.NewL2Proposer(shim.L2ProposerConfig{
-		CommonConfig: shim.NewCommonConfig(l2Net.T()),
-		ID: stack.L2ProposerID{
-			Key:     proposerService.Name,
-			ChainID: l2ID.ChainID(),
-		},
-		Client: o.rpcClient(l2Net.T(), proposerService, HTTPProtocol),
-	}))
+	for _, instance := range proposerService {
+		l2Net.AddL2Proposer(shim.NewL2Proposer(shim.L2ProposerConfig{
+			CommonConfig: shim.NewCommonConfig(l2Net.T()),
+			ID: stack.L2ProposerID{
+				Key:     instance.Name,
+				ChainID: l2ID.ChainID(),
+			},
+			Client: o.rpcClient(l2Net.T(), instance, HTTPProtocol),
+		}))
+	}
 }
 
 func (o *Orchestrator) hydrateChallengerMaybe(net *descriptors.L2Chain, l2Net stack.ExtensibleL2Network) {
@@ -193,13 +201,15 @@ func (o *Orchestrator) hydrateChallengerMaybe(net *descriptors.L2Chain, l2Net st
 		return
 	}
 
-	l2Net.AddL2Challenger(shim.NewL2Challenger(shim.L2ChallengerConfig{
-		CommonConfig: shim.NewCommonConfig(l2Net.T()),
-		ID: stack.L2ChallengerID{
-			Key:     challengerService.Name,
-			ChainID: l2ID.ChainID(),
-		},
-	}))
+	for _, instance := range challengerService {
+		l2Net.AddL2Challenger(shim.NewL2Challenger(shim.L2ChallengerConfig{
+			CommonConfig: shim.NewCommonConfig(l2Net.T()),
+			ID: stack.L2ChallengerID{
+				Key:     instance.Name,
+				ChainID: l2ID.ChainID(),
+			},
+		}))
+	}
 }
 
 func (o *Orchestrator) defineSystemKeys(t devtest.T) stack.Keys {

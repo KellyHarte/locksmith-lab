@@ -49,18 +49,20 @@ func (o *Orchestrator) hydrateSupervisorsMaybe(sys stack.ExtensibleSystem) {
 	supervisors := make(map[stack.SupervisorID]bool)
 	for _, l2 := range o.env.Env.L2 {
 		if supervisorService, ok := l2.Services["supervisor"]; ok {
-			id := stack.SupervisorID(supervisorService.Name)
-			if supervisors[id] {
-				// each supervisor appears in multiple L2s (covering the dependency set),
-				// so we need to deduplicate
-				continue
+			for _, instance := range supervisorService {
+				id := stack.SupervisorID(instance.Name)
+				if supervisors[id] {
+					// each supervisor appears in multiple L2s (covering the dependency set),
+					// so we need to deduplicate
+					continue
+				}
+				supervisors[id] = true
+				sys.AddSupervisor(shim.NewSupervisor(shim.SupervisorConfig{
+					CommonConfig: shim.NewCommonConfig(sys.T()),
+					ID:           id,
+					Client:       o.rpcClient(sys.T(), instance, RPCProtocol),
+				}))
 			}
-			supervisors[id] = true
-			sys.AddSupervisor(shim.NewSupervisor(shim.SupervisorConfig{
-				CommonConfig: shim.NewCommonConfig(sys.T()),
-				ID:           id,
-				Client:       o.rpcClient(sys.T(), supervisorService, RPCProtocol),
-			}))
 		}
 	}
 }

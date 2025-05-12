@@ -54,14 +54,16 @@ func (o *Orchestrator) hydrateL1(system stack.ExtensibleSystem) {
 	}
 
 	if faucet, ok := env.Env.L1.Services["faucet"]; ok {
-		for _, endpoint := range faucet.Endpoints {
-			endpoint.Path = fmt.Sprintf("chain/%s", l1.ChainID().String())
+		for _, instance := range faucet {
+			for _, endpoint := range instance.Endpoints {
+				endpoint.Path = fmt.Sprintf("chain/%s", l1.ChainID().String())
+			}
+			l1.AddFaucet(shim.NewFaucet(shim.FaucetConfig{
+				CommonConfig: commonConfig,
+				Client:       o.rpcClient(t, instance, RPCProtocol),
+				ID:           stack.FaucetID{Key: instance.Name, ChainID: l1ID},
+			}))
 		}
-		l1.AddFaucet(shim.NewFaucet(shim.FaucetConfig{
-			CommonConfig: commonConfig,
-			Client:       o.rpcClient(t, faucet, RPCProtocol),
-			ID:           stack.FaucetID{Key: faucet.Name, ChainID: l1ID},
-		}))
 	}
 
 	system.AddL1Network(l1)
