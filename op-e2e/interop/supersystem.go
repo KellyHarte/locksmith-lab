@@ -215,7 +215,7 @@ func (s *interopE2ESystem) prepareL1() (*fakebeacon.FakeBeacon, *geth.GethInstan
 		l1Clock = s.timeTravelClock
 	}
 	// Start the L1 chain
-	l1Geth, err := geth.InitL1(
+	l1Geth, _, err := geth.InitL1(
 		blockTimeL1,
 		l1FinalizedDistance,
 		s.worldOutput.L1.Genesis,
