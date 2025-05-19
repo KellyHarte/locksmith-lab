@@ -1,6 +1,8 @@
 package reorgs
 
 import (
+	"context"
+	"fmt"
 	"math/rand"
 	"strings"
 	"testing"
@@ -13,12 +15,12 @@ import (
 	"github.com/ethereum-optimism/optimism/op-devstack/devtest"
 	"github.com/ethereum-optimism/optimism/op-devstack/dsl"
 	"github.com/ethereum-optimism/optimism/op-devstack/presets"
-	"github.com/ethereum-optimism/optimism/op-devstack/stack/match"
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/wait"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/retry"
 	"github.com/ethereum-optimism/optimism/op-service/txintent"
 	"github.com/ethereum-optimism/optimism/op-service/txplan"
+	suptypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
 	"github.com/ethereum-optimism/optimism/op-test-sequencer/sequencer/seqtypes"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -26,7 +28,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestReorgInitExecMsg(gt *testing.T) {
+// TestReorgInvalidExecMsgs tests that the supervisor reorgs the chain when an invalid exec msg is included
+// Each subtest runs a test with  a different invalid message, by modifying the message in the txModifierFn
+func TestReorgInvalidExecMsgs(gt *testing.T) {
+	gt.Run("invalid log index", func(gt *testing.T) {
+		testReorgInvalidExecMsg(gt, func(msg *suptypes.Message) {
+			msg.Identifier.LogIndex = 1024
+		})
+	})
+
+	gt.Run("invalid block number", func(gt *testing.T) {
+		testReorgInvalidExecMsg(gt, func(msg *suptypes.Message) {
+			msg.Identifier.BlockNumber = msg.Identifier.BlockNumber - 1
+		})
+	})
+
+	gt.Run("invalid chain id", func(gt *testing.T) {
+		testReorgInvalidExecMsg(gt, func(msg *suptypes.Message) {
+			msg.Identifier.ChainID = eth.ChainIDFromUInt64(1024)
+		})
+	})
+}
+
+func testReorgInvalidExecMsg(gt *testing.T, txModifierFn func(msg *suptypes.Message)) {
 	t := devtest.SerialT(gt)
 	ctx := t.Ctx()
 
@@ -64,7 +88,7 @@ func TestReorgInitExecMsg(gt *testing.T) {
 	sys.L1Network.WaitForBlock()
 	sys.L2ChainA.WaitForBlock()
 
-	// stop batchers on chain A and on chain B
+	// stop batcher on chain A
 	{
 		err := retry.Do0(ctx, 3, retry.Exponential(), func() error {
 			err := sys.L2BatcherA.Escape().ActivityAPI().StopBatcher(ctx)
@@ -74,22 +98,13 @@ func TestReorgInitExecMsg(gt *testing.T) {
 			return err
 		})
 		require.NoError(t, err, "Expected to be able to call StopBatcher API on chain A, but got error")
-
-		err = retry.Do0(ctx, 3, retry.Exponential(), func() error {
-			err := sys.L2BatcherB.Escape().ActivityAPI().StopBatcher(ctx)
-			if err != nil && strings.Contains(err.Error(), "batcher is not running") {
-				return nil
-			}
-			return err
-		})
-		require.NoError(t, err, "Expected to be able to call StopBatcher API on chain B, but got error")
 	}
 
-	// deploy event logger on chain A
+	// deploy event logger on chain B
 	var eventLoggerAddress common.Address
 	{
 		tx := txplan.NewPlannedTx(txplan.Combine(
-			alice.Plan(),
+			bob.Plan(),
 			txplan.WithData(common.FromHex(bindings.EventloggerBin)),
 		))
 		res, err := tx.Included.Eval(ctx)
@@ -117,22 +132,26 @@ func TestReorgInitExecMsg(gt *testing.T) {
 
 	var initTx *txintent.IntentTx[*txintent.InitTrigger, *txintent.InteropOutput]
 	var initReceipt *types.Receipt
-	// prepare and include initiating message on chain A
+	// prepare and include initiating message on chain B
 	{
-		initTx = txintent.NewIntent[*txintent.InitTrigger, *txintent.InteropOutput](alice.Plan())
+		initTx = txintent.NewIntent[*txintent.InitTrigger, *txintent.InteropOutput](bob.Plan())
 		initTx.Content.Set(initTrigger)
 		var err error
 		initReceipt, err = initTx.PlannedTx.Included.Eval(ctx)
 		require.NoError(t, err)
 
-		l.Info("initiating message included", "chain", sys.L2ChainA.ChainID(), "block_number", initReceipt.BlockNumber, "block_hash", initReceipt.BlockHash, "now", time.Now().Unix())
+		l.Info("initiating message included in chain B", "chain", sys.L2ChainB.ChainID(), "block_number", initReceipt.BlockNumber, "block_hash", initReceipt.BlockHash, "now", time.Now().Unix())
 	}
 
-	// stop sequencer on chain A so that we later force a reorg/removal of the init msg
-	{
-		unsafeHead, err := sys.L2CLA.Escape().RollupAPI().StopSequencer(ctx)
-		require.NoError(t, err, "expected to be able to call StopSequencer API, but got error")
+	// at least one block between the init tx on chain B and the exec tx on chain A
+	sys.L2ChainA.WaitForBlock()
 
+	var latestUnsafe_A common.Hash
+	// stop sequencer on chain A so that we later force include an invalid exec msg
+	{
+		var err error
+		latestUnsafe_A, err = sys.L2CLA.Escape().RollupAPI().StopSequencer(ctx)
+		require.NoError(t, err, "expected to be able to call StopSequencer API, but got error")
 		// wait for the sequencer to become inactive
 		var active bool
 		err = wait.For(ctx, 1*time.Second, func() (bool, error) {
@@ -141,62 +160,81 @@ func TestReorgInitExecMsg(gt *testing.T) {
 		})
 		require.NoError(t, err, "expected to be able to call SequencerActive API, and wait for inactive state for sequencer, but got error")
 
-		l.Info("rollup node sequencer status", "chain", sys.L2ChainA.ChainID(), "active", active, "unsafeHead", unsafeHead)
+		l.Info("rollup node sequencer status", "active", active, "unsafeHead", latestUnsafe_A)
 	}
 
-	// at least one block between the init tx on chain A and the exec tx on chain B
-	sys.L2ChainB.WaitForBlock()
-
 	var execTx *txintent.IntentTx[*txintent.ExecTrigger, *txintent.InteropOutput]
-	var execReceipt *types.Receipt
-	// prepare and include executing message on chain B
+	var execSignedTx *types.Transaction
+	var execTxEncoded []byte
+	// prepare and include invalid executing message on chain B via the op-test-sequencer (no other way to force-include an invalid message)
 	{
-		execTx = txintent.NewIntent[*txintent.ExecTrigger, *txintent.InteropOutput](bob.Plan())
+		execTx = txintent.NewIntent[*txintent.ExecTrigger, *txintent.InteropOutput](alice.Plan())
 		execTx.Content.DependOn(&initTx.Result)
-		// single event in tx so index is 0. ExecuteIndexed returns a lambda to transform InteropOutput to a new ExecTrigger
-		execTx.Content.Fn(txintent.ExecuteIndexed(constants.CrossL2Inbox, &initTx.Result, 0))
-		var err error
-		execReceipt, err = execTx.PlannedTx.Included.Eval(ctx)
-		require.NoError(t, err)
-		require.Equal(t, 1, len(execReceipt.Logs))
+		// single event in tx so index is 0.
+		index := 0
+		// lambda to transform InteropOutput to a new broken ExecTrigger
+		execTx.Content.Fn(func(ctx context.Context) (*txintent.ExecTrigger, error) {
+			events := initTx.Result.Value()
+			if x := len(events.Entries); x <= index {
+				return nil, fmt.Errorf("invalid index: %d, only have %d events", index, x)
+			}
+			msg := events.Entries[index]
+			// modify the message in order to make it invalid
+			txModifierFn(&msg)
+			return &txintent.ExecTrigger{
+				Executor: constants.CrossL2Inbox,
+				Msg:      msg,
+			}, nil
+		})
 
-		l.Info("executing message included", "chain", sys.L2ChainB.ChainID(), "block_number", execReceipt.BlockNumber, "block_hash", execReceipt.BlockHash, "now", time.Now().Unix())
+		var err error
+		execSignedTx, err = execTx.PlannedTx.Signed.Eval(ctx)
+		require.NoError(t, err)
+
+		l.Info("executing message signed", "to", execSignedTx.To(), "nonce", execSignedTx.Nonce(), "data", len(execSignedTx.Data()))
+
+		execTxEncoded, err = execSignedTx.MarshalBinary()
+		require.NoError(t, err, "Expected to be able to marshal a signed transaction on op-test-sequencer, but got error")
+	}
+
+	// sequence a new block with an invalid executing msg on chain A
+	{
+		l.Info("Building chain A with op-test-sequencer, and include invalid exec msg", "chain", sys.L2ChainA.ChainID(), "unsafeHead", latestUnsafe_A)
+
+		err := ia.New(ctx, seqtypes.BuildOpts{
+			Parent:   latestUnsafe_A,
+			L1Origin: nil,
+		})
+		require.NoError(t, err, "Expected to be able to create a new block job for sequencing on op-test-sequencer, but got error")
+
+		// include invalid executing msg in opened block
+		err = ia.IncludeTx(ctx, execTxEncoded)
+		require.NoError(t, err, "Expected to be able to include a signed transaction on op-test-sequencer, but got error")
+
+		err = ia.Next(ctx)
+		require.NoError(t, err, "Expected to be able to call Next() after New() on op-test-sequencer, but got error")
 	}
 
 	// record divergence block numbers and original refs for future validation checks
-	var divergenceBlockNumber_A, divergenceBlockNumber_B uint64
-	var originalRef_A, originalRef_B eth.L2BlockRef
+	var divergenceBlockNumber_A uint64
+	var originalHash_A common.Hash
 
-	// sequence a conflicting block with a simple transfer tx, based on the parent of the parent of the unsafe head
+	// sequence a second block with op-test-sequencer
 	{
-		var err error
-		divergenceBlockNumber_B = execReceipt.BlockNumber.Uint64()
-		originalRef_B, err = sys.L2ELB.Escape().L2EthClient().L2BlockRefByHash(ctx, execReceipt.BlockHash)
-		require.NoError(t, err, "Expected to be able to call L2BlockRefByHash API, but got error")
+		currentUnsafeRef := sys.L2ChainA.UnsafeHeadRef()
 
-		headToReorgA := initReceipt.BlockHash
-		headToReorgARef, err := sys.L2ELA.Escape().L2EthClient().L2BlockRefByHash(ctx, headToReorgA)
-		require.NoError(t, err, "Expected to be able to call L2BlockRefByHash API, but got error")
+		l.Info("Unsafe head after invalid exec msg has been included in chain A", "chain", sys.L2ChainA.ChainID(), "unsafeHead", currentUnsafeRef, "parent", currentUnsafeRef.ParentID())
 
-		divergenceBlockNumber_A = headToReorgARef.Number
-		originalRef_A = headToReorgARef
+		divergenceBlockNumber_A = currentUnsafeRef.Number
+		originalHash_A = currentUnsafeRef.Hash
 
-		parentOfHeadToReorgA := headToReorgARef.ParentID()
-		parentsL1Origin, err := sys.L2ELA.Escape().L2EthClient().L2BlockRefByHash(ctx, parentOfHeadToReorgA.Hash)
-		require.NoError(t, err, "Expected to be able to call L2BlockRefByHash API, but got error")
-
-		nextL1Origin := parentsL1Origin.L1Origin.Number + 1
-		l1Origin, err := sys.L1Network.Escape().L1ELNode(match.FirstL1EL).EthClient().InfoByNumber(ctx, nextL1Origin)
-		require.NoError(t, err, "Expected to get block number %v from L1 execution client", nextL1Origin)
-		l1OriginHash := l1Origin.Hash()
-
-		l.Info("Sequencing a conflicting block", "chain", sys.L2ChainA.ChainID(), "newL1Origin", eth.ToBlockID(l1Origin), "headToReorgA", headToReorgARef, "parent", parentOfHeadToReorgA, "parent_l1_origin", parentsL1Origin.L1Origin)
-
-		err = ia.New(ctx, seqtypes.BuildOpts{
-			Parent:   parentOfHeadToReorgA.Hash,
-			L1Origin: &l1OriginHash,
+		l.Info("Continue building chain A with another block with op-test-sequencer", "chain", sys.L2ChainA.ChainID(), "unsafeHead", currentUnsafeRef, "parent", currentUnsafeRef.ParentID())
+		err := ia.New(ctx, seqtypes.BuildOpts{
+			Parent:   currentUnsafeRef.Hash,
+			L1Origin: nil,
 		})
 		require.NoError(t, err, "Expected to be able to create a new block job for sequencing on op-test-sequencer, but got error")
+		time.Sleep(2 * time.Second)
 
 		// include simple transfer tx in opened block
 		{
@@ -211,21 +249,6 @@ func TestReorgInitExecMsg(gt *testing.T) {
 			err = ia.IncludeTx(ctx, txdata)
 			require.NoError(t, err, "Expected to be able to include a signed transaction on op-test-sequencer, but got error")
 		}
-
-		err = ia.Next(ctx)
-		require.NoError(t, err, "Expected to be able to call Next() after New() on op-test-sequencer, but got error")
-	}
-
-	// sequence a second block with op-test-sequencer
-	{
-		currentUnsafeRef := sys.L2ChainA.UnsafeHeadRef()
-		l.Info("Current unsafe ref", "unsafeHead", currentUnsafeRef)
-		err := ia.New(ctx, seqtypes.BuildOpts{
-			Parent:   currentUnsafeRef.Hash,
-			L1Origin: nil,
-		})
-		require.NoError(t, err, "Expected to be able to create a new block job for sequencing on op-test-sequencer, but got error")
-		time.Sleep(2 * time.Second)
 
 		err = ia.Next(ctx)
 		require.NoError(t, err, "Expected to be able to call Next() after New() on op-test-sequencer, but got error")
@@ -251,76 +274,41 @@ func TestReorgInitExecMsg(gt *testing.T) {
 		l.Info("Rollup node sequencer", "active", active)
 	}
 
-	// start batchers on chain A and on chain B
+	// start batchers on chain A
 	{
 		err := retry.Do0(ctx, 3, retry.Exponential(), func() error {
 			return sys.L2BatcherA.Escape().ActivityAPI().StartBatcher(ctx)
 		})
 		require.NoError(t, err, "Expected to be able to call StartBatcher API on chain A, but got error")
-
-		err = retry.Do0(ctx, 3, retry.Exponential(), func() error {
-			return sys.L2BatcherB.Escape().ActivityAPI().StartBatcher(ctx)
-		})
-		require.NoError(t, err, "Expected to be able to call StartBatcher API on chain B, but got error")
 	}
 
-	// confirm reorg on chain A
-	{
-		reorgedRef_A, err := sys.L2ELA.Escape().EthClient().BlockRefByNumber(ctx, divergenceBlockNumber_A)
-		require.NoError(t, err, "Expected to be able to call BlockRefByNumber API, but got error")
-
-		l.Info("Reorged chain A on divergence block number (prior the reorg)", "chain", sys.L2ChainA.ChainID(), "number", divergenceBlockNumber_A, "head", originalRef_A.Hash, "parent", originalRef_A.ParentID().Hash)
-		l.Info("Reorged chain A on divergence block number (after the reorg)", "chain", sys.L2ChainA.ChainID(), "number", divergenceBlockNumber_A, "head", reorgedRef_A.Hash, "parent", reorgedRef_A.ParentID().Hash)
-		require.NotEqual(t, originalRef_A.Hash, reorgedRef_A.Hash, "Expected to get different heads on divergence block A number, but got the same hash, so no reorg happened")
-		require.Equal(t, originalRef_A.ParentID().Hash, reorgedRef_A.ParentHash, "Expected to get same parent hashes on divergence block A number, but got different hashes")
-	}
-
-	// wait for reorg on chain B
+	// wait for reorg on chain A
 	require.Eventually(t, func() bool {
-		reorgedRef_B, err := sys.L2ELB.Escape().EthClient().BlockRefByNumber(ctx, divergenceBlockNumber_B)
+		reorgedRef_A, err := sys.L2ELA.Escape().EthClient().BlockRefByNumber(ctx, divergenceBlockNumber_A)
 		if err != nil {
 			if strings.Contains(err.Error(), "not found") { // reorg is happening wait a bit longer
-				l.Info("Supervisor still hasn't reorged chain B", "error", err)
+				l.Info("Supervisor still hasn't reorged chain A", "error", err)
 				return false
 			}
 			require.NoError(t, err, "Expected to be able to call BlockRefByNumber API, but got error")
 		}
 
-		if originalRef_B.Hash.Cmp(reorgedRef_B.Hash) == 0 { // want not equal
-			l.Info("Supervisor still hasn't reorged chain B", "ref", originalRef_B)
+		if originalHash_A.Cmp(reorgedRef_A.Hash) == 0 { // want not equal
+			l.Info("Supervisor still hasn't reorged chain A", "ref", reorgedRef_A)
 			return false
 		}
 
-		l.Info("Reorged chain B on divergence block number (prior the reorg)", "chain", sys.L2ChainB.ChainID(), "number", divergenceBlockNumber_B, "head", originalRef_B.Hash, "parent", originalRef_B.ParentID().Hash)
-		l.Info("Reorged chain B on divergence block number (after the reorg)", "chain", sys.L2ChainB.ChainID(), "number", divergenceBlockNumber_B, "head", reorgedRef_B.Hash, "parent", reorgedRef_B.ParentID().Hash)
+		l.Info("Reorged chain A on divergence block number (prior the reorg)", "number", divergenceBlockNumber_A, "head", originalHash_A)
+		l.Info("Reorged chain A on divergence block number (after the reorg)", "number", divergenceBlockNumber_A, "head", reorgedRef_A.Hash, "parent", reorgedRef_A.ParentID().Hash)
 		return true
-	}, 180*time.Second, 10*time.Second, "No reorg happened on chain B. Should have been triggered by the supervisor.")
-
-	// executing tx should eventually be no longer confirmed on chain B
-	require.Eventually(t, func() bool {
-		receipt, err := sys.L2ELB.Escape().EthClient().TransactionReceipt(ctx, execReceipt.TxHash)
-		if err == nil || err.Error() != "not found" { // want to get "not found" error
-			return false
-		}
-		if receipt != nil { // want to get nil receipt
-			return false
-		}
-		return true
-	}, 60*time.Second, 3*time.Second, "Expected for the executing tx to be removed from chain B")
+	}, 180*time.Second, 10*time.Second, "No reorg happened on chain A. Should have been triggered by the supervisor.")
 
 	err := wait.For(ctx, 5*time.Second, func() (bool, error) {
 		safeL2Head_supervisor_A := sys.Supervisor.SafeBlockID(sys.L2ChainA.ChainID()).Hash
-		safeL2Head_supervisor_B := sys.Supervisor.SafeBlockID(sys.L2ChainB.ChainID()).Hash
 		safeL2Head_sequencer_A := sys.L2CLA.SafeL2BlockRef()
-		safeL2Head_sequencer_B := sys.L2CLB.SafeL2BlockRef()
 
 		if safeL2Head_sequencer_A.Number < divergenceBlockNumber_A {
 			l.Info("Safe ref number is still behind divergence block A number", "divergence", divergenceBlockNumber_A, "safe", safeL2Head_sequencer_A.Number)
-			return false, nil
-		}
-
-		if safeL2Head_sequencer_B.Number < divergenceBlockNumber_B {
-			l.Info("Safe ref number is still behind divergence block B number", "divergence", divergenceBlockNumber_B, "safe", safeL2Head_sequencer_B.Number)
 			return false, nil
 		}
 
@@ -329,16 +317,9 @@ func TestReorgInitExecMsg(gt *testing.T) {
 			return false, nil
 		}
 
-		if safeL2Head_sequencer_B.Hash.Cmp(safeL2Head_supervisor_B) != 0 {
-			l.Info("Safe ref still not the same on supervisor and sequencer B", "supervisor", safeL2Head_supervisor_B, "sequencer", safeL2Head_sequencer_B.Hash)
-			return false, nil
-		}
-
 		l.Info("Safe ref the same across supervisor and sequencers",
 			"supervisor_A", safeL2Head_supervisor_A,
-			"sequencer_A", safeL2Head_sequencer_A.Hash,
-			"supervisor_B", safeL2Head_supervisor_B,
-			"sequencer_B", safeL2Head_sequencer_B.Hash)
+			"sequencer_A", safeL2Head_sequencer_A.Hash)
 
 		return true, nil
 	})
