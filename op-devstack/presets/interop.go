@@ -86,8 +86,8 @@ func NewSimpleInterop(t devtest.T) *SimpleInterop {
 		L2ChainB:     dsl.NewL2Network(l2B),
 		L2ELA:        dsl.NewL2ELNode(l2A.L2ELNode(match.Assume(t, match.FirstL2EL))),
 		L2ELB:        dsl.NewL2ELNode(l2B.L2ELNode(match.Assume(t, match.FirstL2EL))),
-		L2CLA:        dsl.NewL2CLNode(l2A.L2CLNode(match.Assume(t, match.FirstL2CL)), orch.ControlPlane(), l2A.ChainID()),
-		L2CLB:        dsl.NewL2CLNode(l2B.L2CLNode(match.Assume(t, match.FirstL2CL)), orch.ControlPlane(), l2B.ChainID()),
+		L2CLA:        dsl.NewL2CLNode(l2A.L2CLNode(match.Assume(t, match.FirstL2CL)), orch.ControlPlane()),
+		L2CLB:        dsl.NewL2CLNode(l2B.L2CLNode(match.Assume(t, match.FirstL2CL)), orch.ControlPlane()),
 		Wallet:       dsl.NewHDWallet(t, devkeys.TestMnemonic, 30),
 		FaucetA:      dsl.NewFaucet(l2A.Faucet(match.Assume(t, match.FirstFaucet))),
 		FaucetB:      dsl.NewFaucet(l2B.Faucet(match.Assume(t, match.FirstFaucet))),
@@ -161,7 +161,7 @@ func NewRedundantInterop(t devtest.T) *RedundantInterop {
 	out := &RedundantInterop{
 		SimpleInterop: *simpleInterop,
 		L2ELA2:        dsl.NewL2ELNode(l2A.L2ELNode(match.Assume(t, match.SecondL2EL))),
-		L2CLA2:        dsl.NewL2CLNode(l2A.L2CLNode(match.Assume(t, match.SecondL2CL)), orch.ControlPlane(), l2A.ChainID()),
+		L2CLA2:        dsl.NewL2CLNode(l2A.L2CLNode(match.Assume(t, match.SecondL2CL)), orch.ControlPlane()),
 	}
 	return out
 }
@@ -188,7 +188,7 @@ func NewMultiSupervisorInterop(t devtest.T) *MultiSupervisorInterop {
 		RedundantInterop:    *redundancyInterop,
 		SupervisorSecondary: dsl.NewSupervisor(redundancyInterop.system.Supervisor(match.Assume(t, match.SecondSupervisor)), orch.ControlPlane()),
 		L2ELB2:              dsl.NewL2ELNode(l2B.L2ELNode(match.Assume(t, match.SecondL2EL))),
-		L2CLB2:              dsl.NewL2CLNode(l2B.L2CLNode(match.Assume(t, match.SecondL2CL)), orch.ControlPlane(), l2B.ChainID()),
+		L2CLB2:              dsl.NewL2CLNode(l2B.L2CLNode(match.Assume(t, match.SecondL2CL)), orch.ControlPlane()),
 	}
 	return out
 }

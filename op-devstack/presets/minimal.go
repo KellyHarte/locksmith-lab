@@ -54,7 +54,7 @@ func NewMinimal(t devtest.T) *Minimal {
 		L2Chain:      dsl.NewL2Network(l2),
 		L2Batcher:    dsl.NewL2Batcher(l2.L2Batcher(match.Assume(t, match.FirstL2Batcher))),
 		L2EL:         dsl.NewL2ELNode(l2.L2ELNode(match.Assume(t, match.FirstL2EL))),
-		L2CL:         dsl.NewL2CLNode(l2.L2CLNode(match.Assume(t, match.FirstL2CL)), orch.ControlPlane(), l2.ChainID()),
+		L2CL:         dsl.NewL2CLNode(l2.L2CLNode(match.Assume(t, match.FirstL2CL)), orch.ControlPlane()),
 		Wallet:       dsl.NewHDWallet(t, devkeys.TestMnemonic, 30),
 		Faucet:       dsl.NewFaucet(l2.Faucet(match.Assume(t, match.FirstFaucet))),
 	}
