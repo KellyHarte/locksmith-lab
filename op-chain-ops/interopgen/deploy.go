@@ -185,7 +185,6 @@ func DeploySuperchainToL1(l1Host *script.Host, superCfg *SuperchainConfig) (*Sup
 		SuperchainConfigProxy:           superDeployment.SuperchainConfigProxy,
 		ProtocolVersionsProxy:           superDeployment.ProtocolVersionsProxy,
 		UpgradeController:               superCfg.ProxyAdminOwner,
-		UseInterop:                      superCfg.Implementations.UseInterop,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to deploy Implementations contracts: %w", err)
@@ -308,9 +307,10 @@ func GenesisL2(l2Host *script.Host, cfg *L2Config, deployment *L2Deployment) err
 		L1FeeVaultWithdrawalNetwork:              big.NewInt(int64(cfg.L1FeeVaultWithdrawalNetwork.ToUint8())),
 		GovernanceTokenOwner:                     cfg.GovernanceTokenOwner,
 		Fork:                                     big.NewInt(cfg.SolidityForkNumber(1)),
-		UseInterop:                               cfg.UseInterop,
-		EnableGovernance:                         cfg.EnableGovernance,
-		FundDevAccounts:                          cfg.FundDevAccounts,
+		// Only include interop predeploys if it is activating at genesis
+		UseInterop:       cfg.L2GenesisInteropTimeOffset != nil && *cfg.L2GenesisInteropTimeOffset == 0,
+		EnableGovernance: cfg.EnableGovernance,
+		FundDevAccounts:  cfg.FundDevAccounts,
 	}); err != nil {
 		return fmt.Errorf("failed L2 genesis: %w", err)
 	}

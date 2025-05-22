@@ -22,7 +22,6 @@ type DeployImplementationsInput struct {
 	ProtocolVersionsProxy common.Address
 	SuperchainProxyAdmin  common.Address
 	UpgradeController     common.Address
-	UseInterop            bool // if true, deploy Interop implementations
 }
 
 func (input *DeployImplementationsInput) InputSet() bool {

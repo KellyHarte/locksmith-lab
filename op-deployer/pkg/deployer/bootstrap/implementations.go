@@ -43,7 +43,6 @@ type ImplementationsConfig struct {
 	ProtocolVersionsProxy           common.Address     `cli:"protocol-versions-proxy"`
 	UpgradeController               common.Address     `cli:"upgrade-controller"`
 	SuperchainProxyAdmin            common.Address     `cli:"superchain-proxy-admin"`
-	UseInterop                      bool               `cli:"use-interop"`
 	CacheDir                        string             `cli:"cache-dir"`
 
 	Logger log.Logger
@@ -204,7 +203,6 @@ func Implementations(ctx context.Context, cfg ImplementationsConfig) (opcm.Deplo
 			ProtocolVersionsProxy:           cfg.ProtocolVersionsProxy,
 			SuperchainProxyAdmin:            cfg.SuperchainProxyAdmin,
 			UpgradeController:               cfg.UpgradeController,
-			UseInterop:                      cfg.UseInterop,
 		},
 	); err != nil {
 		return dio, fmt.Errorf("error deploying implementations: %w", err)
