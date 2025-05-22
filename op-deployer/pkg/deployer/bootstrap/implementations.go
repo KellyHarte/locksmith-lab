@@ -189,8 +189,12 @@ func Implementations(ctx context.Context, cfg ImplementationsConfig) (opcm.Deplo
 		return dio, fmt.Errorf("failed to create script host: %w", err)
 	}
 
-	if dio, err = opcm.DeployImplementations(
-		l1Host,
+	opcmScripts, err := opcm.NewScripts(l1Host)
+	if err != nil {
+		return dio, fmt.Errorf("failed to load OPCM scripts: %w", err)
+	}
+
+	if dio, err = opcmScripts.DeployImplementations.Run(
 		opcm.DeployImplementationsInput{
 			WithdrawalDelaySeconds:          new(big.Int).SetUint64(cfg.WithdrawalDelaySeconds),
 			MinProposalSizeBytes:            new(big.Int).SetUint64(cfg.MinProposalSizeBytes),
