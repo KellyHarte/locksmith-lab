@@ -59,3 +59,7 @@ func (n *L1Network) PrintChain() {
 	n.log.Info("Printing block hashes and parent hashes", "network", n.String(), "chain", n.ChainID())
 	spew.Dump(entries)
 }
+
+func (n *L1Network) WaitForOnline() {
+	NewL1ELNode(n.inner.L1ELNode(match.FirstL1EL)).WaitForOnline()
+}
