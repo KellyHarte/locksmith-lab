@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-program/client/boot"
 	"github.com/ethereum-optimism/optimism/op-program/client/interop/types"
 	"github.com/ethereum-optimism/optimism/op-program/client/l1"
+	test2 "github.com/ethereum-optimism/optimism/op-program/client/l1/test"
 	"github.com/ethereum-optimism/optimism/op-program/client/l2"
 	"github.com/ethereum-optimism/optimism/op-program/client/l2/test"
 	"github.com/ethereum-optimism/optimism/op-program/client/tasks"
@@ -48,13 +49,17 @@ func setupTwoChains(opts ...func(*chainSetupOpts)) (*staticConfigSource, *eth.Su
 		opt(chainSetupOpts)
 	}
 
-	rollupCfg1 := chaincfg.OPSepolia()
-	chainCfg1 := chainconfig.OPSepoliaChainConfig()
+	rollupCfg1 := *chaincfg.OPSepolia()
+	chainCfg1 := *chainconfig.OPSepoliaChainConfig()
 
 	rollupCfg2 := *chaincfg.OPSepolia()
 	rollupCfg2.L2ChainID = new(big.Int).SetUint64(42)
 	chainCfg2 := *chainconfig.OPSepoliaChainConfig()
 	chainCfg2.ChainID = rollupCfg2.L2ChainID
+
+	// activate interop at genesis for both
+	rollupCfg1.InteropTime = new(uint64)
+	rollupCfg2.InteropTime = new(uint64)
 
 	agreedSuperRoot := &eth.SuperV1{
 		Timestamp: rollupCfg1.Genesis.L2Time + 1234,
@@ -67,18 +72,18 @@ func setupTwoChains(opts ...func(*chainSetupOpts)) (*staticConfigSource, *eth.Su
 	var ds *depset.StaticConfigDependencySet
 	if chainSetupOpts.expiryWindow > 0 {
 		ds, _ = depset.NewStaticConfigDependencySetWithMessageExpiryOverride(map[eth.ChainID]*depset.StaticConfigDependency{
-			eth.ChainIDFromBig(rollupCfg1.L2ChainID): {ActivationTime: 0, HistoryMinTime: 0},
-			eth.ChainIDFromBig(rollupCfg2.L2ChainID): {ActivationTime: 0, HistoryMinTime: 0},
+			eth.ChainIDFromBig(rollupCfg1.L2ChainID): {},
+			eth.ChainIDFromBig(rollupCfg2.L2ChainID): {},
 		}, chainSetupOpts.expiryWindow)
 	} else {
 		ds, _ = depset.NewStaticConfigDependencySet(map[eth.ChainID]*depset.StaticConfigDependency{
-			eth.ChainIDFromBig(rollupCfg1.L2ChainID): {ActivationTime: 0, HistoryMinTime: 0},
-			eth.ChainIDFromBig(rollupCfg2.L2ChainID): {ActivationTime: 0, HistoryMinTime: 0},
+			eth.ChainIDFromBig(rollupCfg1.L2ChainID): {},
+			eth.ChainIDFromBig(rollupCfg2.L2ChainID): {},
 		})
 	}
 	configSource := &staticConfigSource{
-		rollupCfgs:   []*rollup.Config{rollupCfg1, &rollupCfg2},
-		chainConfigs: []*params.ChainConfig{chainCfg1, &chainCfg2},
+		rollupCfgs:   []*rollup.Config{&rollupCfg1, &rollupCfg2},
+		chainConfigs: []*params.ChainConfig{&chainCfg1, &chainCfg2},
 		depset:       ds,
 		chainIDs:     []eth.ChainID{eth.ChainIDFromBig(rollupCfg1.L2ChainID), eth.ChainIDFromBig(rollupCfg2.L2ChainID)},
 	}
@@ -695,13 +700,17 @@ func TestHazardSet_ExpiredMessageShortCircuitsInclusionCheck(t *testing.T) {
 			On("Contains", mock.Anything, mock.Anything).Return(supervisortypes.BlockSeal{}, supervisortypes.ErrConflict).
 			Maybe()
 
+		linker := depset.LinkCheckFn(func(execInChain eth.ChainID, execInTimestamp uint64, initChainID eth.ChainID, initTimestamp uint64) bool {
+			window := configSource.depset.MessageExpiryWindow()
+			return initTimestamp+window >= execInTimestamp
+		})
 		deps := &cross.UnsafeHazardDeps{UnsafeStartDeps: mockConsolidateDeps}
 		candidate := supervisortypes.BlockSeal{
 			Hash:      block2A.Hash(),
 			Number:    block2A.NumberU64(),
 			Timestamp: block2A.Time(),
 		}
-		_, err = cross.NewHazardSet(deps, logger, eth.ChainIDFromBig(configA.L2ChainID), candidate)
+		_, err = cross.NewHazardSet(deps, linker, logger, eth.ChainIDFromBig(configA.L2ChainID), candidate)
 		require.ErrorIs(t, err, supervisortypes.ErrConflict)
 
 		if expectInclusionCheck {
@@ -737,7 +746,18 @@ func verifyResult(t *testing.T, logger log.Logger, tasks *stubTasks, configSourc
 		Claim:          expectedClaim,
 		Configs:        configSource,
 	}
-	err := runInteropProgram(logger, bootInfo, nil, l2PreimageOracle, true, tasks)
+	l1Oracle := test2.NewStubOracle(t)
+	for _, chainID := range configSource.chainIDs {
+		rollupCfg, err := configSource.RollupConfig(chainID)
+		require.NoError(t, err)
+		// Assuming the anchor block of the L2 on the L1 is the same timestamp as the genesis block of L1.
+		l1Oracle.Blocks[rollupCfg.Genesis.L1.Hash] = &testutils.MockBlockInfo{
+			InfoHash: rollupCfg.Genesis.L1.Hash,
+			InfoNum:  rollupCfg.Genesis.L1.Number,
+			InfoTime: rollupCfg.Genesis.L2Time,
+		}
+	}
+	err := runInteropProgram(logger, bootInfo, l1Oracle, l2PreimageOracle, true, tasks)
 	require.NoError(t, err)
 }
 
