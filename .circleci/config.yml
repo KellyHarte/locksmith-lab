@@ -1090,6 +1090,74 @@ jobs:
             - notify-failures-on-develop:
                 mentions: "<<parameters.mentions>>"
 
+  go-tests-with-fault-proof-deps:
+    parameters:
+      notify:
+        description: Whether to notify on failure
+        type: boolean
+        default: false
+      mentions:
+        description: Slack user or group to mention when notifying of failures
+        type: string
+        default: ""
+      resource_class:
+        description: Machine resource class
+        type: string
+        default: ethereum-optimism/latitude-1-go-e2e
+      no_output_timeout:
+        description: Timeout for when CircleCI kills the job if there's no output
+        type: string
+        default: 60m
+      test_timeout:
+        description: Timeout for running tests
+        type: string
+        default: 10m
+      environment_overrides:
+        description: Environment overrides
+        type: string
+        default: ""
+    machine: true
+    resource_class: <<parameters.resource_class>>
+    steps:
+      - utils/checkout-with-mise
+      - attach_workspace:
+          at: "."
+      - run:
+          name: build op-program-client
+          command: make op-program-client
+          working_directory: op-program
+      - run:
+          name: build op-program-host
+          command: make op-program-host
+          working_directory: op-program
+      - run:
+          name: build cannon
+          command: make cannon
+      - run:
+          name: run tests
+          no_output_timeout: <<parameters.no_output_timeout>>
+          command: |
+            <<parameters.environment_overrides>>
+            export TEST_TIMEOUT=<<parameters.test_timeout>>
+            make go-tests-fraud-proofs-ci
+      - codecov/upload:
+          disable_search: true
+          files: ./coverage.out
+      - store_test_results:
+          path: ./tmp/test-results
+      - run:
+          name: Compress test logs
+          command: tar -czf testlogs.tar.gz -C ./tmp testlogs
+          when: always
+      - store_artifacts:
+          path: testlogs.tar.gz
+          when: always
+      - when:
+          condition: "<<parameters.notify>>"
+          steps:
+            - notify-failures-on-develop:
+                mentions: "<<parameters.mentions>>"
+
   op-acceptance-tests:
     parameters:
       devnet:
@@ -2055,9 +2123,8 @@ workflows:
           context:
             - slack
             - circleci-repo-readonly-authenticated-github-token
-      - go-tests:
+      - go-tests-with-fault-proof-deps:
           name: op-e2e-cannon-tests
-          rule: go-tests-fraud-proofs-ci
           notify: true
           mentions: "@proofs-team"
           no_output_timeout: 60m
