@@ -116,7 +116,7 @@ func (cl *L2CLNode) HeadBlockRef(lvl types.SafetyLevel) eth.L2BlockRef {
 }
 
 func (cl *L2CLNode) ChainID() eth.ChainID {
-	return cl.inner.ID().ChainID
+	return cl.inner.ID().ChainID()
 }
 
 // AdvancedFn returns a lambda that checks the L2CL chain head with given safety level advanced more than delta block number
@@ -232,7 +232,7 @@ func (cl *L2CLNode) Rewinded(lvl types.SafetyLevel, delta uint64, attempts int) 
 
 // ChainSyncStatus satisfies that the L2CLNode can provide sync status per chain
 func (cl *L2CLNode) ChainSyncStatus(chainID eth.ChainID, lvl types.SafetyLevel) eth.BlockID {
-	cl.require.Equal(chainID, cl.inner.ID().ChainID, "chain ID mismatch")
+	cl.require.Equal(chainID, cl.inner.ID().ChainID(), "chain ID mismatch")
 	return cl.HeadBlockRef(lvl).ID()
 }
 
