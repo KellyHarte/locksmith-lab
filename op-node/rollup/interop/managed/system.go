@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/engine"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/event"
+	"github.com/ethereum-optimism/optimism/op-service/binary"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
 	"github.com/ethereum-optimism/optimism/op-service/rpc"
@@ -378,60 +379,88 @@ func (m *ManagedMode) Reset(ctx context.Context, lUnsafe, xUnsafe, lSafe, xSafe,
 	return nil
 }
 
-// findLatestValidLocalUnsafe scans the L2 unsafe chain for the latest block with a valid L1 origin,
-// starting from its latest unsafe and going back until the target provided by the supervisor.
-// If the supervisor's target is ahead, the latest unsafe is returned.
+// findLatestValidLocalUnsafe searches and returns the latest valid block of the L2 chain
+// starting from `l2UnsafeTarget` and checking until the latest unsafe block.
 func (m *ManagedMode) findLatestValidLocalUnsafe(ctx context.Context, l2UnsafeTarget eth.BlockID) (eth.L2BlockRef, error) {
 	latestUnsafe, err := m.l2.L2BlockRefByLabel(ctx, eth.Unsafe)
 	if err != nil {
 		return eth.L2BlockRef{}, err
 	}
+
 	logger := m.log.New("target", l2UnsafeTarget, "latestUnsafe", latestUnsafe)
-	if latestUnsafe.Number < l2UnsafeTarget.Number {
-		logger.Warn("Latest unsafe block is older than target, using latest unsafe")
-		return latestUnsafe, nil
+	target := l2UnsafeTarget.Number
+
+	logger.Info("Searching for latest valid local unsafe")
+
+	targetDiff := int(latestUnsafe.Number - target)
+	if targetDiff > 0 {
+		// Binary search to find and return the last valid block for idx in [0, targetDiff)
+		// We don't check validity of `target`, `target` is not in the search space, it is checked
+		// in the walkback loop section below if necessary.
+
+		// Search space:
+		// ------------------------------------------------------------------------------------------
+		// target.Number |  idx=0      idx=1      idx=2     ...  idx = targetDiff-1 = latestUnsafe   |
+		// false         |  t/f        t/f        t/f       ...  t/f                                 |
+		// ------------------------------------------------------------------------------------------
+		idx, valid, err := binary.SearchL(targetDiff, func(i int) (bool, eth.L2BlockRef, error) {
+			block, err := m.verifyBlock(ctx, logger, target+1+uint64(i))
+			return block != (eth.L2BlockRef{}), block, err
+		})
+		if err != nil {
+			return eth.L2BlockRef{}, err
+		}
+
+		if idx != -1 {
+			logger.Info("Found last valid block with binary search", "valid", valid)
+			return valid, nil
+		} else {
+			logger.Info("All blocks checked by binary search are invalid between target and latestUnsafe")
+		}
+	} else if targetDiff < 0 {
+		logger.Warn("Latest unsafe block is older than target, using latest unsafe for search")
+		target = latestUnsafe.Number
 	}
 
-	unsafeTarget, err := m.l2.L2BlockRefByHash(ctx, l2UnsafeTarget.Hash)
+	// In the following walkback loop, the following two cases are covered:
+	// 1. targetDiff == 0 or targetDiff < 0 (i.e. target == latestUnsafe), or
+	// 2. all blocks checked by binary search were invalid, so we have to go from `target` backwards indefinitely
+	//    until we find a valid block
+	for n := target; ; n-- {
+		if n == target-1 {
+			logger.Warn("No valid unsafe block found up to target, searching further")
+		}
+
+		valid, err := m.verifyBlock(ctx, logger, n)
+		if err != nil {
+			return eth.L2BlockRef{}, err
+		}
+
+		if valid != (eth.L2BlockRef{}) {
+			logger.Info("Fould last valid block", "valid", valid)
+			return valid, nil
+		}
+	}
+}
+
+// verifyBlock
+func (m *ManagedMode) verifyBlock(ctx context.Context, logger log.Logger, blockNum uint64) (eth.L2BlockRef, error) {
+	current, err := m.l2.L2BlockRefByNumber(ctx, blockNum)
 	if err != nil {
 		return eth.L2BlockRef{}, err
 	}
 
-	logger.Info("Searching for latest valid local unsafe")
-	if latestUnsafe.Number-unsafeTarget.Number > 20 {
-		logger.Warn("We may scan more than 20 blocks, this loop might need to be optimised")
+	// Check if L1Origin has been reorged
+	l1Blk, err := m.l1.L1BlockRefByNumber(ctx, current.L1Origin.Number)
+	if err != nil {
+		return eth.L2BlockRef{}, err
 	}
-
-	// Start from latestUnsafe and go down to find the latest valid block, since L1 reorgs aren't usually that deep.
-	for n := latestUnsafe.Number; ; n-- {
-		if n == l2UnsafeTarget.Number-1 {
-			logger.Warn("No valid unsafe block found up to target, searching further")
-		}
-		// Exit loop if context is done - other errors are only logged and loop continues.
-		if cerr := ctx.Err(); cerr != nil {
-			return eth.L2BlockRef{}, fmt.Errorf("context done: %w", cerr)
-		}
-
-		current, err := m.l2.L2BlockRefByNumber(ctx, n)
-		if err != nil {
-			logger.Warn("Failed to get L2 block ref, trying previous", "err", err, "current", n)
-			continue
-		}
-
-		logger := logger.New("current", current, "currentL1Origin", current.L1Origin)
-		// make sure L1 origin hasn't been reorged
-		l1Origin, err := m.l1.L1BlockRefByNumber(ctx, current.L1Origin.Number)
-		if err != nil {
-			logger.Warn("Failed to get origin L1 block ref, trying previous", "err", err)
-			continue
-		}
-		if l1Origin.Hash != current.L1Origin.Hash {
-			logger.Warn("L1 block was reorged on this block, trying previous", "newL1Origin", l1Origin)
-			continue
-		}
-		logger.Info("Latest valid L2 block found", "valid", current)
-		return current, nil
+	if l1Blk.Hash != current.L1Origin.Hash {
+		logger.Debug("L1Origin field is invalid/outdated, so block is invalid and should be reorged", "currentNumber", current.Number, "currentL1Origin", current.L1Origin, "newL1Origin", l1Blk)
+		return eth.L2BlockRef{}, nil
 	}
+	logger.Trace("L1Origin field points to canonical L1 block, so block is valid", "blocknum", blockNum, "l1Blk", l1Blk)
+	return current, nil
 }
 
 func (m *ManagedMode) ProvideL1(ctx context.Context, nextL1 eth.BlockRef) error {
