@@ -6,7 +6,6 @@ import (
 	"math/big"
 	"reflect"
 
-	"github.com/ethereum-optimism/optimism/op-chain-ops/script"
 	"github.com/ethereum-optimism/optimism/op-service/apis"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/testreq"
@@ -244,7 +243,7 @@ func CustomTypeToGoType(retTyp reflect.Type) reflect.Type {
 	case reflect.TypeOf(eth.ETH{}), reflect.TypeOf(eth.ChainID{}):
 		return reflect.TypeOf(big.NewInt(0))
 	case reflect.TypeOf(suptypes.Identifier{}):
-		return reflect.TypeOf(script.ABIIdentifier{})
+		return reflect.TypeOf(ABIIdentifier{})
 	default:
 		return retTyp
 	}
@@ -259,7 +258,7 @@ func CustomValueToABIValue(arg any) any {
 	case eth.ChainID:
 		value = v.ToBig()
 	case suptypes.Identifier:
-		identifier := script.ABIIdentifier{
+		identifier := ABIIdentifier{
 			Origin:      v.Origin,
 			BlockNumber: big.NewInt(int64(v.BlockNumber)),
 			LogIndex:    big.NewInt(int64(v.LogIndex)),
@@ -307,20 +306,42 @@ func (c *TypedCall[ReturnType]) DecodeOutput(data []byte) (ReturnType, error) {
 		return *new(ReturnType), nil
 	}
 
-	if retTyp.Kind() == reflect.Struct {
-		panic("multiple return type using struct is not supported yet")
-	}
-
 	abiTargetType := CustomTypeToGoType(retTyp)
-	abiType, err := script.GoTypeToABIType(abiTargetType)
+	abiType, components, err := goTypeToABIType(abiTargetType)
 	if err != nil {
-		panic(err)
+		return *new(ReturnType), fmt.Errorf("failed to convert go type to abi type: %w", err)
 	}
 
 	outputs := abi.Arguments{{Type: abiType}}
+	// try to unpack assuming every field is static
 	decoded, err := outputs.Unpack(data)
 	if err != nil {
-		panic(err)
+		// at lest one dynamic field is included so unpack by mimicing abi.UnpackIntoInterface method
+		args := abi.Arguments{}
+		for idx, component := range components {
+			t, err := abi.NewType(component.Type, "", component.Components)
+			if err != nil {
+				return *new(ReturnType), fmt.Errorf("failed to create type: %w", err)
+			}
+			name := component.Name
+			// make sure name is properly set and unique
+			if name == "" || name == "_" {
+				name = fmt.Sprintf("arg%d", idx)
+			}
+			args = append(args, abi.Argument{Type: t, Name: name})
+		}
+		decoded, err = args.Unpack(data)
+		if err != nil {
+			// we do not support custom value decoding when struct with dynamic fields.
+			// using with eth.ETH or eth.ChainID will fail
+			return *new(ReturnType), fmt.Errorf("failed to unpack: %w", err)
+		}
+		var val ReturnType
+		err = args.Copy(&val, decoded)
+		if err != nil {
+			return *new(ReturnType), fmt.Errorf("failed to convert go format to provided struct: %w", err)
+		}
+		return val, nil
 	}
 
 	val := ABIValueToCustomValue[ReturnType](retTyp, decoded[0])
@@ -334,7 +355,7 @@ func ABIEncoder(name string, args ...any) ([]byte, error) {
 	for i, arg := range args {
 		goType := CustomTypeToGoType(reflect.TypeOf(arg))
 		abiValue := CustomValueToABIValue(arg)
-		abiType, err := script.GoTypeToABIType(goType)
+		abiType, _, err := goTypeToABIType(goType)
 		if err != nil {
 			panic(err)
 		}

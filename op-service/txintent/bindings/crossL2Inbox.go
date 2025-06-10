@@ -1,6 +1,8 @@
 package bindings
 
 import (
+	"math/big"
+
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/predeploys"
 	supTypes "github.com/ethereum-optimism/optimism/op-supervisor/supervisor/types"
@@ -17,6 +19,14 @@ func NewCrossL2InboxCallFactory(opts ...CallFactoryOption) *CrossL2InboxFactory 
 
 func (f *CrossL2InboxFactory) WithDefaultAddr() {
 	f.ApplyFactoryOptions(WithTo(common.HexToAddress(predeploys.CrossL2Inbox)))
+}
+
+type ABIIdentifier struct {
+	Origin      common.Address
+	BlockNumber *big.Int
+	LogIndex    *big.Int
+	Timestamp   *big.Int
+	ChainId     *big.Int
 }
 
 type CrossL2Inbox struct {
