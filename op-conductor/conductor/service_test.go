@@ -995,6 +995,7 @@ func (s *OpConductorTestSuite) TestFlashblocksHandlerIntegration() {
 	defer testCancel()
 
 	serverConnected := make(chan struct{})
+	clientConnected := make(chan struct{})
 	messagesSent := make(chan struct{})
 
 	// Use sync.Once to prevent double-closing channels
@@ -1017,7 +1018,15 @@ func (s *OpConductorTestSuite) TestFlashblocksHandlerIntegration() {
 			close(serverConnected)
 		})
 
-		// Send test messages immediately and signal completion
+		// Wait for client to connect before sending messages
+		select {
+		case <-clientConnected:
+			// Client is connected, proceed with sending messages
+		case <-testCtx.Done():
+			return
+		}
+
+		// Send test messages and signal completion
 		messages := []string{"Hello", "World", "Test"}
 		for _, msg := range messages {
 			err := conn.Write(testCtx, websocket.MessageText, []byte(msg))
@@ -1086,15 +1095,7 @@ func (s *OpConductorTestSuite) TestFlashblocksHandlerIntegration() {
 		s.Fail("Timeout waiting for rollup boost server connection")
 	}
 
-	// Wait for messages to be sent (event-driven)
-	select {
-	case <-messagesSent:
-		// Messages sent
-	case <-time.After(2 * time.Second):
-		s.Fail("Timeout waiting for messages to be sent")
-	}
-
-	// Connect to the WebSocket server using event-driven approach
+	// Connect to the WebSocket server BEFORE messages are sent
 	wsURL := fmt.Sprintf("ws://localhost:%d/ws", s.cfg.WebsocketServerPort)
 
 	// Create connection context
@@ -1129,6 +1130,17 @@ func (s *OpConductorTestSuite) TestFlashblocksHandlerIntegration() {
 
 connected:
 	defer client.Close(websocket.StatusNormalClosure, "test complete")
+
+	// Signal that client is connected so rollup boost server can send messages
+	close(clientConnected)
+
+	// Wait for messages to be sent (event-driven)
+	select {
+	case <-messagesSent:
+		// Messages sent
+	case <-time.After(2 * time.Second):
+		s.Fail("Timeout waiting for messages to be sent")
+	}
 
 	// Wait for and verify we receive messages from rollup boost (event-driven)
 	expectedMessages := []string{"Hello", "World", "Test"}
