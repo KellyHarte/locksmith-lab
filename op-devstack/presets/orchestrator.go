@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"slices"
 	"sync/atomic"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel"
 
 	"github.com/ethereum-optimism/optimism/devnet-sdk/telemetry"
+	"github.com/ethereum-optimism/optimism/op-devstack/compat"
 	"github.com/ethereum-optimism/optimism/op-devstack/devtest"
 	"github.com/ethereum-optimism/optimism/op-devstack/stack"
 	"github.com/ethereum-optimism/optimism/op-devstack/sysext"
@@ -80,14 +82,20 @@ func DoMain(m *testing.M, opts ...stack.CommonOption) {
 		// Make the package-level logger use this context
 		logger.SetContext(ctx)
 
-		p := devtest.NewP(ctx, logger, func(now bool) {
+		onFail := func(now bool) {
 			logger.Error("Main failed")
 			debug.PrintStack()
 			failed.Store(true)
 			if now {
 				panic("critical Main fail")
 			}
-		})
+		}
+
+		onSkipNow := func() {
+			logger.Info("Main skipped")
+			os.Exit(0)
+		}
+		p := devtest.NewP(ctx, logger, onFail, onSkipNow)
 		defer p.Close()
 
 		p.Require().NotEmpty(opts, "Expecting orchestrator options")
@@ -152,4 +160,27 @@ Add a TestMain to your test package init the orchestrator:
 `)
 	}
 	return out
+}
+
+// WithCompatibleTypes is a common option that can be used to ensure that the orchestrator is compatible with the preset.
+// If the orchestrator is not compatible, the test will either:
+// - fail with a non-zero exit code (42) if DEVNET_EXPECT_PRECONDITIONS_MET is non-empty
+// - skip the whole test otherwise
+// This is useful to ensure that the preset is only used with the correct orchestrator type.
+// Do yourself a favor, if you use this option, add a good comment (or a TODO) justifying it!
+func WithCompatibleTypes(t ...compat.Type) stack.CommonOption {
+	return stack.FnOption[stack.Orchestrator]{
+		BeforeDeployFn: func(orch stack.Orchestrator) {
+			if !slices.Contains(t, orch.Type()) {
+				p := orch.P()
+
+				if os.Getenv(devtest.ExpectPreconditionsMet) != "" {
+					p.Errorf("Orchestrator type %s is incompatible with this preset", orch.Type())
+					os.Exit(compat.CompatErrorCode)
+				} else {
+					p.SkipNow()
+				}
+			}
+		},
+	}
 }
