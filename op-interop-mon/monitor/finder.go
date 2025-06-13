@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/ethereum-optimism/optimism/op-service/buffer"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/sources"
 	"github.com/ethereum/go-ethereum"
@@ -51,7 +52,7 @@ type RPCFinder struct {
 
 	fetchInterval time.Duration
 	next          uint64
-	seenBlocks    *BlockBuffer
+	seenBlocks    *buffer.Ring[eth.BlockInfo]
 	toJobs        JobFilter
 	newCallback   NewCallback
 
@@ -70,7 +71,7 @@ func NewFinder(chainID eth.ChainID,
 		client:               client,
 		log:                  log.New("component", "rpc_finder", "chain_id", chainID),
 		fetchInterval:        1 * time.Second,
-		seenBlocks:           NewBlockBuffer(bufferSize),
+		seenBlocks:           buffer.NewRing[eth.BlockInfo](1000),
 		toJobs:               toCases,
 		newCallback:          newCallback,
 		finalityPollInterval: 10 * time.Second,
@@ -162,7 +163,6 @@ func (t *RPCFinder) processBlock(blockInfo eth.BlockInfo, receipts types.Receipt
 			blockInfo.NumberU64() != previous.NumberU64()+1 {
 			t.log.Error("blocks are not contiguous", "previous", eth.InfoToL1BlockRef(previous), "next", eth.InfoToL1BlockRef(blockInfo))
 			return ErrBlockNotContiguous
-
 		}
 	}
 	jobs := t.toJobs([]*types.Receipt(receipts))
@@ -184,10 +184,10 @@ func (t *RPCFinder) processBlock(blockInfo eth.BlockInfo, receipts types.Receipt
 func (t *RPCFinder) walkback(ctx context.Context) error {
 	for {
 		// pop the last block from the buffer
-		previous, err := t.seenBlocks.Pop()
-		if err != nil {
-			t.log.Error("error popping block", "error", err)
-			return err
+		previous := t.seenBlocks.Pop()
+		if previous == nil {
+			t.log.Error("no blocks to walk back to")
+			return ErrBlockNotFound
 		}
 		// fetch the block from the client
 		block, err := t.client.InfoByNumber(ctx, previous.NumberU64())
