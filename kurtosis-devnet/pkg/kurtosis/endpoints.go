@@ -265,13 +265,12 @@ func (f *ServiceFinder) triage() {
 			endpoints[portName] = portInfo
 		}
 
-		// TODO: for now, use labels as a fallback, so it's currently inactive.
-		// We should expect the rules to be gradually removed to make way for
-		// this code path. Ultimately we'll rely only on labels, and most of the
-		// code in this file will disappear as a result.
-		triaged := rules.apply(serviceName, endpoints)
+		// Ultimately we'll rely only on labels, and most of the code in this file will disappear as a result.
+		//
+		// For now though the L1 services are still not tagged properly so we rely on the name resolution as a fallback
+		triaged := f.triageByLabels(svc, serviceName, endpoints)
 		if triaged == nil {
-			triaged = f.triageByLabels(svc, serviceName, endpoints)
+			triaged = rules.apply(serviceName, endpoints)
 		}
 
 		if triaged != nil {
