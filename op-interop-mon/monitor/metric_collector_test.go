@@ -209,7 +209,7 @@ func TestCollectMetrics(t *testing.T) {
 		updater1Jobs map[JobID]*Job
 		updater2Jobs map[JobID]*Job
 		updater3Jobs map[JobID]*Job
-		// Expected metric calls
+		// Expected metric calls (only non-zero expectations)
 		expectedMessageStatusCalls   []expectedMessageStatusCall
 		expectedTerminalCalls        []expectedTerminalCall
 		expectedExecutingRangeCalls  []expectedBlockRangeCall
@@ -218,44 +218,27 @@ func TestCollectMetrics(t *testing.T) {
 
 	tests := []testCase{
 		{
-			name:                         "empty job maps",
-			updater1Jobs:                 map[JobID]*Job{},
-			updater2Jobs:                 map[JobID]*Job{},
-			updater3Jobs:                 map[JobID]*Job{},
-			expectedMessageStatusCalls:   []expectedMessageStatusCall{},
-			expectedTerminalCalls:        []expectedTerminalCall{},
-			expectedExecutingRangeCalls:  []expectedBlockRangeCall{},
-			expectedInitiatingRangeCalls: []expectedBlockRangeCall{},
+			name:         "empty job maps",
+			updater1Jobs: map[JobID]*Job{},
+			updater2Jobs: map[JobID]*Job{},
+			updater3Jobs: map[JobID]*Job{},
+			// All expectations are default (zero)
 		},
 		{
-			name: "single job with future status",
+			name: "single job with valid status",
 			updater1Jobs: map[JobID]*Job{
-				"job1": jobForTest(1, 100, "0x123", 2, 200, jobStatusFuture),
+				"job1": jobForTest(1, 100, "0x123", 2, 200, jobStatusValid),
 			},
 			updater2Jobs: map[JobID]*Job{},
 			updater3Jobs: map[JobID]*Job{},
 			expectedMessageStatusCalls: []expectedMessageStatusCall{
-				{
-					executingChainID:  "1",
-					initiatingChainID: "2",
-					status:            "future",
-					count:             1,
-				},
+				{"1", "2", "valid", 1},
 			},
-			expectedTerminalCalls: []expectedTerminalCall{},
 			expectedExecutingRangeCalls: []expectedBlockRangeCall{
-				{
-					chainID: "1",
-					min:     100,
-					max:     100,
-				},
+				{"1", 100, 100},
 			},
 			expectedInitiatingRangeCalls: []expectedBlockRangeCall{
-				{
-					chainID: "2",
-					min:     200,
-					max:     200,
-				},
+				{"2", 200, 200},
 			},
 		},
 		{
@@ -266,71 +249,40 @@ func TestCollectMetrics(t *testing.T) {
 			updater2Jobs: map[JobID]*Job{},
 			updater3Jobs: map[JobID]*Job{},
 			expectedMessageStatusCalls: []expectedMessageStatusCall{
-				{
-					executingChainID:  "1",
-					initiatingChainID: "2",
-					status:            "invalid",
-					count:             1,
-				},
+				{"1", "2", "invalid", 1},
 			},
 			expectedTerminalCalls: []expectedTerminalCall{
-				{
-					executingChainID:  "1",
-					initiatingChainID: "2",
-					count:             1,
-				},
+				{"1", "2", 1},
 			},
 			expectedExecutingRangeCalls: []expectedBlockRangeCall{
-				{
-					chainID: "1",
-					min:     100,
-					max:     100,
-				},
+				{"1", 100, 100},
 			},
 			expectedInitiatingRangeCalls: []expectedBlockRangeCall{
-				{
-					chainID: "2",
-					min:     200,
-					max:     200,
-				},
+				{"2", 200, 200},
 			},
 		},
 		{
 			name: "multiple jobs with same status",
 			updater1Jobs: map[JobID]*Job{
-				"job1": jobForTest(1, 100, "0x123", 2, 200, jobStatusFuture),
-				"job2": jobForTest(1, 101, "0x456", 2, 201, jobStatusFuture),
+				"job1": jobForTest(1, 100, "0x123", 2, 200, jobStatusValid),
+				"job2": jobForTest(1, 101, "0x456", 2, 201, jobStatusValid),
 			},
 			updater2Jobs: map[JobID]*Job{},
 			updater3Jobs: map[JobID]*Job{},
 			expectedMessageStatusCalls: []expectedMessageStatusCall{
-				{
-					executingChainID:  "1",
-					initiatingChainID: "2",
-					status:            "future",
-					count:             2,
-				},
+				{"1", "2", "valid", 2},
 			},
-			expectedTerminalCalls: []expectedTerminalCall{},
 			expectedExecutingRangeCalls: []expectedBlockRangeCall{
-				{
-					chainID: "1",
-					min:     100,
-					max:     101,
-				},
+				{"1", 100, 101},
 			},
 			expectedInitiatingRangeCalls: []expectedBlockRangeCall{
-				{
-					chainID: "2",
-					min:     200,
-					max:     201,
-				},
+				{"2", 200, 201},
 			},
 		},
 		{
 			name: "jobs across different chains",
 			updater1Jobs: map[JobID]*Job{
-				"job1": jobForTest(1, 100, "0x123", 2, 200, jobStatusFuture),
+				"job1": jobForTest(1, 100, "0x123", 2, 200, jobStatusValid),
 			},
 			updater2Jobs: map[JobID]*Job{
 				"job2": jobForTest(2, 300, "0x456", 3, 400, jobStatusValid),
@@ -339,67 +291,27 @@ func TestCollectMetrics(t *testing.T) {
 				"job3": jobForTest(3, 500, "0x789", 1, 600, jobStatusInvalid),
 			},
 			expectedMessageStatusCalls: []expectedMessageStatusCall{
-				{
-					executingChainID:  "1",
-					initiatingChainID: "2",
-					status:            "future",
-					count:             1,
-				},
-				{
-					executingChainID:  "2",
-					initiatingChainID: "3",
-					status:            "valid",
-					count:             1,
-				},
-				{
-					executingChainID:  "3",
-					initiatingChainID: "1",
-					status:            "invalid",
-					count:             1,
-				},
+				{"1", "2", "valid", 1},
+				{"2", "3", "valid", 1},
+				{"3", "1", "invalid", 1},
 			},
-			expectedTerminalCalls: []expectedTerminalCall{},
 			expectedExecutingRangeCalls: []expectedBlockRangeCall{
-				{
-					chainID: "1",
-					min:     100,
-					max:     100,
-				},
-				{
-					chainID: "2",
-					min:     300,
-					max:     300,
-				},
-				{
-					chainID: "3",
-					min:     500,
-					max:     500,
-				},
+				{"1", 100, 100},
+				{"2", 300, 300},
+				{"3", 500, 500},
 			},
 			expectedInitiatingRangeCalls: []expectedBlockRangeCall{
-				{
-					chainID: "1",
-					min:     600,
-					max:     600,
-				},
-				{
-					chainID: "2",
-					min:     200,
-					max:     200,
-				},
-				{
-					chainID: "3",
-					min:     400,
-					max:     400,
-				},
+				{"1", 600, 600},
+				{"2", 200, 200},
+				{"3", 400, 400},
 			},
 		},
 		{
 			name: "complex block ranges",
 			updater1Jobs: map[JobID]*Job{
-				"job1": jobForTest(1, 100, "0x123", 2, 200, jobStatusFuture),
-				"job2": jobForTest(1, 50, "0x456", 2, 250, jobStatusFuture),
-				"job3": jobForTest(1, 150, "0x789", 2, 150, jobStatusFuture),
+				"job1": jobForTest(1, 100, "0x123", 2, 200, jobStatusValid),
+				"job2": jobForTest(1, 50, "0x456", 2, 250, jobStatusValid),
+				"job3": jobForTest(1, 150, "0x789", 2, 150, jobStatusValid),
 			},
 			updater2Jobs: map[JobID]*Job{
 				"job4": jobForTest(2, 300, "0xabc", 1, 400, jobStatusValid),
@@ -412,59 +324,19 @@ func TestCollectMetrics(t *testing.T) {
 				"job9": jobForTest(3, 550, "0xpqr", 3, 550, jobStatusInvalid),
 			},
 			expectedMessageStatusCalls: []expectedMessageStatusCall{
-				{
-					executingChainID:  "1",
-					initiatingChainID: "2",
-					status:            "future",
-					count:             3,
-				},
-				{
-					executingChainID:  "2",
-					initiatingChainID: "1",
-					status:            "valid",
-					count:             3,
-				},
-				{
-					executingChainID:  "3",
-					initiatingChainID: "3",
-					status:            "invalid",
-					count:             3,
-				},
+				{"1", "2", "valid", 3},
+				{"2", "1", "valid", 3},
+				{"3", "3", "invalid", 3},
 			},
-			expectedTerminalCalls: []expectedTerminalCall{},
 			expectedExecutingRangeCalls: []expectedBlockRangeCall{
-				{
-					chainID: "1",
-					min:     50,
-					max:     150,
-				},
-				{
-					chainID: "2",
-					min:     250,
-					max:     350,
-				},
-				{
-					chainID: "3",
-					min:     450,
-					max:     550,
-				},
+				{"1", 50, 150},
+				{"2", 250, 350},
+				{"3", 450, 550},
 			},
 			expectedInitiatingRangeCalls: []expectedBlockRangeCall{
-				{
-					chainID: "1",
-					min:     350,
-					max:     450,
-				},
-				{
-					chainID: "2",
-					min:     150,
-					max:     250,
-				},
-				{
-					chainID: "3",
-					min:     550,
-					max:     650,
-				},
+				{"1", 350, 450},
+				{"2", 150, 250},
+				{"3", 550, 650},
 			},
 		},
 	}
@@ -511,11 +383,75 @@ func TestCollectMetrics(t *testing.T) {
 			// Run metric collection
 			collector.CollectMetrics()
 
+			// Generate expected calls. By default, all different combinations of executing and initiating chains and statuses are expected,
+			// but will have a zero value if not specified in the test case. Specific expectations are overloaded over the defaults.
+
+			// Default Message Status Calls with specific expectations merged in
+			var expectedMessageStatusCalls []expectedMessageStatusCall
+			for _, executing := range []string{"1", "2", "3"} {
+				for _, initiating := range []string{"1", "2", "3"} {
+					for _, status := range []string{"valid", "invalid", "unknown"} {
+						call := expectedMessageStatusCall{executing, initiating, status, 0}
+						for _, specific := range tt.expectedMessageStatusCalls {
+							if specific.executingChainID == executing &&
+								specific.initiatingChainID == initiating &&
+								specific.status == status {
+								call = specific
+								break
+							}
+						}
+						expectedMessageStatusCalls = append(expectedMessageStatusCalls, call)
+					}
+				}
+			}
+
+			// Default Terminal Calls with specific expectations merged in
+			var expectedTerminalCalls []expectedTerminalCall
+			for _, executing := range []string{"1", "2", "3"} {
+				for _, initiating := range []string{"1", "2", "3"} {
+					call := expectedTerminalCall{executing, initiating, 0}
+					for _, specific := range tt.expectedTerminalCalls {
+						if specific.executingChainID == executing &&
+							specific.initiatingChainID == initiating {
+							call = specific
+							break
+						}
+					}
+					expectedTerminalCalls = append(expectedTerminalCalls, call)
+				}
+			}
+
+			// Default Executing Range Calls with specific expectations merged in
+			var expectedExecutingRangeCalls []expectedBlockRangeCall
+			for _, chainID := range []string{"1", "2", "3"} {
+				call := expectedBlockRangeCall{chainID, 0, 0}
+				for _, specific := range tt.expectedExecutingRangeCalls {
+					if specific.chainID == chainID {
+						call = specific
+						break
+					}
+				}
+				expectedExecutingRangeCalls = append(expectedExecutingRangeCalls, call)
+			}
+
+			// Default Initiating Range Calls with specific expectations merged in
+			var expectedInitiatingRangeCalls []expectedBlockRangeCall
+			for _, chainID := range []string{"1", "2", "3"} {
+				call := expectedBlockRangeCall{chainID, 0, 0}
+				for _, specific := range tt.expectedInitiatingRangeCalls {
+					if specific.chainID == chainID {
+						call = specific
+						break
+					}
+				}
+				expectedInitiatingRangeCalls = append(expectedInitiatingRangeCalls, call)
+			}
+
 			// Verify metric calls
-			require.ElementsMatch(t, tt.expectedMessageStatusCalls, mockMetrics.actualMessageStatusCalls, "message status calls should match")
-			require.ElementsMatch(t, tt.expectedTerminalCalls, mockMetrics.actualTerminalCalls, "terminal status change calls should match")
-			require.ElementsMatch(t, tt.expectedExecutingRangeCalls, mockMetrics.actualExecutingRangeCalls, "executing block range calls should match")
-			require.ElementsMatch(t, tt.expectedInitiatingRangeCalls, mockMetrics.actualInitiatingRangeCalls, "initiating block range calls should match")
+			require.ElementsMatch(t, expectedMessageStatusCalls, mockMetrics.actualMessageStatusCalls, "message status calls should match")
+			require.ElementsMatch(t, expectedTerminalCalls, mockMetrics.actualTerminalCalls, "terminal status change calls should match")
+			require.ElementsMatch(t, expectedExecutingRangeCalls, mockMetrics.actualExecutingRangeCalls, "executing block range calls should match")
+			require.ElementsMatch(t, expectedInitiatingRangeCalls, mockMetrics.actualInitiatingRangeCalls, "initiating block range calls should match")
 		})
 	}
 }
