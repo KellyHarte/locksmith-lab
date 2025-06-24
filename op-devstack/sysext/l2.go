@@ -180,7 +180,7 @@ func (o *Orchestrator) hydrateFlashblocksBuilderIfPresent(node *descriptors.Node
 			Client:       o.rpcClient(l2Net.T(), rbuilderService, RPCProtocol, "/", opts...),
 			ChainID:      l2ID.ChainID(),
 		},
-		ConductorID:      stack.ConductorID(associatedConductorService.Name),
+		Conductor:        l2Net.Conductor(stack.ConductorID(associatedConductorService.Name)),
 		FlashblocksWsUrl: flashblocksWsUrl,
 	})
 
