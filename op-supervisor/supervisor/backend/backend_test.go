@@ -601,3 +601,99 @@ func TestAsyncVerifyAccessWithRPC(t *testing.T) {
 	// No error + match         => 0 failures
 	runScenario("NoErr_match", sealA, nil, idA)
 }
+
+func TestFailsafeEnabled(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlInfo)
+	m := metrics.NoopMetrics
+	dataDir := t.TempDir()
+	fullCfgSet := fullConfigSet(t, 1)
+
+	cfg := &config.Config{
+		Version:               "test",
+		FullConfigSetSource:   fullCfgSet,
+		SynchronousProcessors: true,
+		MockRun:               false,
+		SyncSources:           &syncnode.CLISyncNodes{},
+		Datadir:               dataDir,
+	}
+
+	ex := event.NewGlobalSynchronous(context.Background())
+	b, err := NewSupervisorBackend(context.Background(), logger, m, cfg, ex)
+	require.NoError(t, err)
+
+	// Test initial state - failsafe should be disabled by default
+	enabled, err := b.GetFailsafeEnabled(context.Background())
+	require.NoError(t, err)
+	require.False(t, enabled, "failsafe should be disabled by default")
+
+	// Test that CheckAccessList works normally in initial state
+	err = b.CheckAccessList(context.Background(), []common.Hash{}, types.LocalUnsafe, types.ExecutingDescriptor{})
+	require.NoError(t, err, "CheckAccessList should work normally when failsafe is disabled")
+
+	// Test setting failsafe to true
+	err = b.SetFailsafeEnabled(context.Background(), true)
+	require.NoError(t, err)
+	enabled, err = b.GetFailsafeEnabled(context.Background())
+	require.NoError(t, err)
+	require.True(t, enabled, "failsafe should be enabled after setting to true")
+
+	// Test that CheckAccessList returns ErrFailsafeEnabled when failsafe is enabled
+	err = b.CheckAccessList(context.Background(), []common.Hash{}, types.LocalUnsafe, types.ExecutingDescriptor{})
+	require.ErrorIs(t, err, types.ErrFailsafeEnabled, "CheckAccessList should return ErrFailsafeEnabled when failsafe is enabled")
+
+	// Test setting failsafe to false
+	err = b.SetFailsafeEnabled(context.Background(), false)
+	require.NoError(t, err)
+	enabled, err = b.GetFailsafeEnabled(context.Background())
+	require.NoError(t, err)
+	require.False(t, enabled, "failsafe should be disabled after setting to false")
+
+	// Test that CheckAccessList works normally when failsafe is disabled
+	err = b.CheckAccessList(context.Background(), []common.Hash{}, types.LocalUnsafe, types.ExecutingDescriptor{})
+	require.NoError(t, err, "CheckAccessList should work normally when failsafe is disabled")
+}
+
+// TestFailsafeEnabledConfigInitialization confirms the configured failsafe state is correctly initialized
+func TestFailsafeEnabledConfigInitialization(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlInfo)
+	m := metrics.NoopMetrics
+	dataDir := t.TempDir()
+	fullCfgSet := fullConfigSet(t, 1)
+
+	testCases := []struct {
+		name            string
+		failsafeEnabled bool
+	}{
+		{
+			name:            "FailsafeEnabled",
+			failsafeEnabled: true,
+		},
+		{
+			name:            "FailsafeDisabled",
+			failsafeEnabled: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Version:               "test",
+				FullConfigSetSource:   fullCfgSet,
+				SynchronousProcessors: true,
+				MockRun:               false,
+				SyncSources:           &syncnode.CLISyncNodes{},
+				Datadir:               dataDir,
+				FailsafeEnabled:       tc.failsafeEnabled,
+			}
+
+			ex := event.NewGlobalSynchronous(context.Background())
+			b, err := NewSupervisorBackend(context.Background(), logger, m, cfg, ex)
+			require.NoError(t, err)
+
+			// Verify that failsafe state matches config after initialization
+			enabled, err := b.GetFailsafeEnabled(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, tc.failsafeEnabled, enabled, "failsafe state should match config setting")
+		})
+	}
+}

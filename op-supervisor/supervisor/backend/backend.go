@@ -83,6 +83,9 @@ type SupervisorBackend struct {
 
 	// rpcVerificationWarnings enables asynchronous RPC verification of DB checkAccess call in the CheckAccessList endpoint, indicating warnings as a metric
 	rpcVerificationWarnings bool
+
+	// failsafeEnabled controls whether the supervisor should enable failsafe mode
+	failsafeEnabled atomic.Bool
 }
 
 var (
@@ -160,6 +163,8 @@ func NewSupervisorBackend(ctx context.Context, logger log.Logger,
 
 		rpcVerificationWarnings: cfg.RPCVerificationWarnings,
 	}
+	// Set failsafe from config
+	super.setFailsafeEnabled(cfg.FailsafeEnabled)
 	eventSys.Register("backend", super)
 	eventSys.Register("rewinder", super.rewinder)
 
@@ -550,6 +555,12 @@ func (su *SupervisorBackend) checkSafety(chainID eth.ChainID, blockID eth.BlockI
 
 func (su *SupervisorBackend) CheckAccessList(ctx context.Context, inboxEntries []common.Hash,
 	minSafety types.SafetyLevel, execDescr types.ExecutingDescriptor) error {
+	// Check if failsafe is enabled
+	if su.isFailsafeEnabled() {
+		su.logger.Debug("Failsafe is enabled, rejecting access-list check")
+		return types.ErrFailsafeEnabled
+	}
+
 	switch minSafety {
 	case types.LocalUnsafe, types.CrossUnsafe, types.LocalSafe, types.CrossSafe, types.Finalized:
 		// valid safety level
@@ -820,4 +831,27 @@ func (su *SupervisorBackend) SetConfDepthL1(depth uint64) {
 // Rewind rolls back the state of the supervisor for the given chain.
 func (su *SupervisorBackend) Rewind(ctx context.Context, chain eth.ChainID, block eth.BlockID) error {
 	return su.chainDBs.Rewind(chain, block)
+}
+
+// SetFailsafeEnabled sets the failsafe mode configuration for the supervisor.
+func (su *SupervisorBackend) SetFailsafeEnabled(ctx context.Context, enabled bool) error {
+	su.setFailsafeEnabled(enabled)
+	return nil
+}
+
+// setFailsafeEnabled sets the failsafe mode configuration for the supervisor.
+// it is an internal function because it does not need context, nor does it return an error.
+func (su *SupervisorBackend) setFailsafeEnabled(enabled bool) {
+	su.failsafeEnabled.Store(enabled)
+}
+
+// GetFailsafeEnabled gets the current failsafe mode configuration for the supervisor.
+func (su *SupervisorBackend) GetFailsafeEnabled(ctx context.Context) (bool, error) {
+	return su.isFailsafeEnabled(), nil
+}
+
+// isFailsafeEnabled returns whether failsafe is enabled.
+func (su *SupervisorBackend) isFailsafeEnabled() bool {
+	// presently the failsafe bool is 1:1 with failsafe being enabled
+	return su.failsafeEnabled.Load()
 }
