@@ -697,3 +697,59 @@ func TestFailsafeEnabledConfigInitialization(t *testing.T) {
 		})
 	}
 }
+
+func TestFailsafeOnInvalidation(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlInfo)
+	m := metrics.NoopMetrics
+	dataDir := t.TempDir()
+	fullCfgSet := fullConfigSet(t, 1)
+
+	testCases := []struct {
+		name                   string
+		failsafeOnInvalidation bool
+		expectFailsafeEnabled  bool
+	}{
+		{
+			name:                   "FailsafeOnInvalidationEnabled",
+			failsafeOnInvalidation: true,
+		},
+		{
+			name:                   "FailsafeOnInvalidationDisabled",
+			failsafeOnInvalidation: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Version:                "test",
+				FullConfigSetSource:    fullCfgSet,
+				SynchronousProcessors:  true,
+				MockRun:                false,
+				SyncSources:            &syncnode.CLISyncNodes{},
+				Datadir:                dataDir,
+				FailsafeEnabled:        false, // Start with failsafe disabled
+				FailsafeOnInvalidation: tc.failsafeOnInvalidation,
+			}
+
+			ex := event.NewGlobalSynchronous(context.Background())
+			b, err := NewSupervisorBackend(context.Background(), logger, m, cfg, ex)
+			require.NoError(t, err)
+
+			// Verify that failsafe starts disabled
+			enabled, err := b.GetFailsafeEnabled(context.Background())
+			require.NoError(t, err)
+			require.False(t, enabled, "failsafe should start disabled")
+
+			// Emit InvalidateLocalSafeEvent
+			b.OnEvent(context.Background(), superevents.InvalidateLocalSafeEvent{
+				ChainID: eth.ChainIDFromUInt64(testChainIDOffset),
+			})
+
+			// Verify that failsafe state matches expectation
+			enabled, err = b.GetFailsafeEnabled(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, tc.failsafeOnInvalidation, enabled, "failsafe state should match FailsafeOnInvalidation setting")
+		})
+	}
+}

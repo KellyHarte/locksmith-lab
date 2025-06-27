@@ -86,6 +86,9 @@ type SupervisorBackend struct {
 
 	// failsafeEnabled controls whether the supervisor should enable failsafe mode
 	failsafeEnabled atomic.Bool
+
+	// failsafeOnInvalidation controls whether failsafe should activate when a block is invalidated
+	failsafeOnInvalidation bool
 }
 
 var (
@@ -165,6 +168,7 @@ func NewSupervisorBackend(ctx context.Context, logger log.Logger,
 	}
 	// Set failsafe from config
 	super.setFailsafeEnabled(cfg.FailsafeEnabled)
+	super.failsafeOnInvalidation = cfg.FailsafeOnInvalidation
 	eventSys.Register("backend", super)
 	eventSys.Register("rewinder", super.rewinder)
 
@@ -234,6 +238,10 @@ func (su *SupervisorBackend) OnEvent(ctx context.Context, ev event.Event) bool {
 		su.emitter.Emit(ctx, superevents.UpdateCrossSafeRequestEvent{
 			ChainID: x.ChainID,
 		})
+	case superevents.InvalidateLocalSafeEvent:
+		if su.failsafeOnInvalidation {
+			su.setFailsafeEnabled(true)
+		}
 	default:
 		return false
 	}
