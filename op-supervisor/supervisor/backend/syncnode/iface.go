@@ -39,6 +39,7 @@ type SyncControl interface {
 	SubscribeEvents(ctx context.Context, c chan *types.IndexingEvent) (ethereum.Subscription, error)
 	PullEvent(ctx context.Context) (*types.IndexingEvent, error)
 	BlockRefByNumber(ctx context.Context, number uint64) (eth.BlockRef, error)
+	L2BlockRefByNumber(ctx context.Context, number uint64) (eth.L2BlockRef, error)
 
 	UpdateCrossUnsafe(ctx context.Context, id eth.BlockID) error
 	UpdateCrossSafe(ctx context.Context, derived eth.BlockID, source eth.BlockID) error
