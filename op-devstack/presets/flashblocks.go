@@ -13,11 +13,13 @@ import (
 type SimpleFlashblocks struct {
 	*Minimal
 
-	ConductorSets          map[stack.L2NetworkID]dsl.ConductorSet
-	FlashblocksBuilderSets map[stack.L2NetworkID]dsl.FlashblocksBuilderSet
-	Faucets                map[stack.L2NetworkID]*dsl.Faucet
-	Funders                map[stack.L2NetworkID]*dsl.Funder
-	L2ELNodes              map[stack.L2NetworkID]*dsl.L2ELNode
+	ConductorSets               map[stack.L2NetworkID]dsl.ConductorSet
+	FlashblocksBuilderSets      map[stack.L2NetworkID]dsl.FlashblocksBuilderSet
+	FlashblocksWebsocketProxies map[stack.L2NetworkID]dsl.FlashblocksWebsocketProxySet
+
+	Faucets   map[stack.L2NetworkID]*dsl.Faucet
+	Funders   map[stack.L2NetworkID]*dsl.Funder
+	L2ELNodes map[stack.L2NetworkID]*dsl.L2ELNode
 }
 
 func WithSimpleFlashblocks() stack.CommonOption {
@@ -42,6 +44,7 @@ func NewSimpleFlashblocks(t devtest.T) *SimpleFlashblocks {
 	faucets := make(map[stack.L2NetworkID]*dsl.Faucet)
 	funders := make(map[stack.L2NetworkID]*dsl.Funder)
 	l2ELNodes := make(map[stack.L2NetworkID]*dsl.L2ELNode)
+	flashblocksWebsocketProxies := make(map[stack.L2NetworkID]dsl.FlashblocksWebsocketProxySet)
 
 	for _, chain := range chains {
 		chainMatcher := match.L2ChainById(chain.ID())
@@ -51,16 +54,19 @@ func NewSimpleFlashblocks(t devtest.T) *SimpleFlashblocks {
 
 		conductorSets[chain.ID()] = dsl.NewConductorSet(l2.Conductors())
 		flashblocksBuilderSets[chain.ID()] = dsl.NewFlashblocksBuilderSet(l2.FlashblocksBuilders())
+		flashblocksWebsocketProxies[chain.ID()] = dsl.NewFlashblocksWebsocketProxySet(l2.FlashblocksWebsocketProxies())
+
 		faucets[chain.ID()] = firstFaucet
 		funders[chain.ID()] = dsl.NewFunder(minimalPreset.Wallet, firstFaucet, firstELNode)
 		l2ELNodes[chain.ID()] = firstELNode
 	}
 	return &SimpleFlashblocks{
-		Minimal:                minimalPreset,
-		ConductorSets:          conductorSets,
-		FlashblocksBuilderSets: flashblocksBuilderSets,
-		Faucets:                faucets,
-		Funders:                funders,
-		L2ELNodes:              l2ELNodes,
+		Minimal:                     minimalPreset,
+		ConductorSets:               conductorSets,
+		FlashblocksBuilderSets:      flashblocksBuilderSets,
+		FlashblocksWebsocketProxies: flashblocksWebsocketProxies,
+		Faucets:                     faucets,
+		Funders:                     funders,
+		L2ELNodes:                   l2ELNodes,
 	}
 }
