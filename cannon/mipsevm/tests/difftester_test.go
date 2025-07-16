@@ -37,7 +37,7 @@ func TestDiffTester_Run_SimpleTest(t *testing.T) {
 				if useCorrectReturnExpectation {
 					return ExpectNormalExecution()
 				} else {
-					return ExpectPanic("oops", "oops")
+					return ExpectVmPanic("oops", "oops")
 				}
 			}
 
@@ -110,7 +110,10 @@ func TestDiffTester_Run_WithMemModifications(t *testing.T) {
 			versions := GetMipsVersionTestCases(t)
 			var mods []string
 			if !skipAutomaticMemTests {
-				mods = append(mods, " [mod:overlappingMemReservation]")
+				for _, memTestCase := range memReservationTestCases {
+					modName := fmt.Sprintf(" [mod:%v]", memTestCase.name)
+					mods = append(mods, modName)
+				}
 			}
 			expectedTestCases := generateExpectedTestCases(testCases, versions, mods...)
 
@@ -168,7 +171,7 @@ func TestDiffTester_Run_WithPanic(t *testing.T) {
 				expect.ExpectStep()
 
 				if useCorrectReturnExpectation {
-					return ExpectPanic("unrecognized syscall: 0", "unimplemented syscall")
+					return ExpectVmPanic("unrecognized syscall: 0", "unimplemented syscall")
 				} else {
 					return ExpectNormalExecution()
 				}
