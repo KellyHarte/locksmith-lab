@@ -163,7 +163,7 @@ func (l *BatchSubmitter) StartBatchSubmitting() error {
 
 	// Channels used to signal between the loops
 	pendingBytesUpdated := make(chan int64, 1)
-	publishSignal := make(chan struct{})
+	publishSignal := make(chan struct{}, 1)
 
 	// DA throttling loop should always be started except for testing (indicated by ThrottleThreshold == 0)
 	if l.Config.ThrottleThreshold > 0 {
@@ -251,7 +251,7 @@ func (l *BatchSubmitter) StopBatchSubmitting(ctx context.Context) error {
 
 // loadBlocksIntoState loads the blocks between start and end (inclusive).
 // If there is a reorg, it will return an error.
-func (l *BatchSubmitter) loadBlocksIntoState(ctx context.Context, start, end uint64) error {
+func (l *BatchSubmitter) loadBlocksIntoState(ctx context.Context, start, end uint64, publishSignal chan struct{}, pendingBytesUpdated chan int64) error {
 	if end < start {
 		return fmt.Errorf("start number is > end number %d,%d", start, end)
 	}
@@ -273,6 +273,15 @@ func (l *BatchSubmitter) loadBlocksIntoState(ctx context.Context, start, end uin
 			return err
 		}
 		latestBlock = block
+
+		if numBlocksLoaded := (i - start + 1); numBlocksLoaded%100 == 0 {
+			// Every 100 blocks, signal the publishing loop to publish.
+			// This allows the batcher to start publishing sooner in the
+			// case of a large backlog of blocks to load.
+			trySignal(publishSignal)
+			l.sendToThrottlingLoop(pendingBytesUpdated)
+		}
+
 	}
 
 	l2ref, err := derive.L2BlockToBlockRef(l.RollupConfig, latestBlock)
@@ -466,6 +475,7 @@ func (l *BatchSubmitter) publishingLoop(ctx context.Context, wg *sync.WaitGroup,
 	txQueue := txmgr.NewQueue[txRef](ctx, l.Txmgr, l.Config.MaxPendingTransactions)
 
 	for range publishSignal {
+		l.Log.Debug("publishing loop received signal")
 		l.publishStateToL1(ctx, txQueue, receiptsCh, daGroup)
 	}
 
@@ -500,7 +510,7 @@ func (l *BatchSubmitter) blockLoadingLoop(ctx context.Context, wg *sync.WaitGrou
 		case <-ticker.C:
 			syncStatus, err := l.getSyncStatus(ctx)
 			if err != nil {
-				l.Log.Warn("could not get sync status", "err", err)
+				l.Log.Warn("could not get sync status, retrying on next tick", "err", err)
 				continue
 			}
 
@@ -508,10 +518,16 @@ func (l *BatchSubmitter) blockLoadingLoop(ctx context.Context, wg *sync.WaitGrou
 
 			if blocksToLoad != nil {
 				// Get fresh unsafe blocks
-				if err := l.loadBlocksIntoState(ctx, blocksToLoad.start, blocksToLoad.end); errors.Is(err, ErrReorg) {
+				err := l.loadBlocksIntoState(ctx, blocksToLoad.start, blocksToLoad.end, publishSignal, pendingBytesUpdated)
+				switch {
+				case errors.Is(err, ErrReorg):
 					l.Log.Warn("error loading blocks, clearing state and waiting for node sync", "err", err)
 					l.waitNodeSyncAndClearState()
-				} else {
+					continue
+				case err != nil:
+					l.Log.Warn("error loading blocks, retrying on next tick", "err", err)
+					continue
+				default:
 					l.sendToThrottlingLoop(pendingBytesUpdated) // we have increased the pending data. Signal the throttling loop to check if it should throttle.
 				}
 			}
