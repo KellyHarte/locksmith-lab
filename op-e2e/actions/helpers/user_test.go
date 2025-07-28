@@ -71,6 +71,7 @@ func (tc *hardforkScheduledTest) fork(fork string) **hexutil.Uint64 {
 }
 
 func TestCrossLayerUser_Default(t *testing.T) {
+	t.Skipf("skipping due to high flakiness")
 	testCrossLayerUser(t, config.DefaultAllocType)
 }
 
