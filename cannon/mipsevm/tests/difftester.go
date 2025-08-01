@@ -20,6 +20,61 @@ import (
 
 type TestNamer[T any] func(testCase T) string
 
+type SimpleInitializeStateFn func(t require.TestingT, state *multithreaded.State, vm VersionedVMTestCase, r *testutil.RandHelper)
+type SimpleSetExpectationsFn func(t require.TestingT, expect *mtutil.ExpectedState, vm VersionedVMTestCase) ExpectedExecResult
+type SimplePostStepCheckFn func(t require.TestingT, vm VersionedVMTestCase, deps *TestDependencies)
+
+type soloTestCase struct {
+	name string
+}
+
+type SimpleDiffTester struct {
+	diffTester DiffTester[soloTestCase]
+}
+
+// NewSimpleDiffTester returns a DiffTester designed to run only a single default test case
+func NewSimpleDiffTester() *SimpleDiffTester {
+	return &SimpleDiffTester{
+		diffTester: *NewDiffTester(func(t soloTestCase) string {
+			return t.name
+		}),
+	}
+}
+
+func (d *SimpleDiffTester) InitState(initStateFn SimpleInitializeStateFn, opts ...mtutil.StateOption) *SimpleDiffTester {
+	wrappedFn := func(t require.TestingT, testCase soloTestCase, state *multithreaded.State, vm VersionedVMTestCase, r *testutil.RandHelper) {
+		initStateFn(t, state, vm, r)
+	}
+	d.diffTester.InitState(wrappedFn, opts...)
+
+	return d
+}
+
+func (d *SimpleDiffTester) SetExpectations(setExpectationsFn SimpleSetExpectationsFn) *SimpleDiffTester {
+	wrappedFn := func(t require.TestingT, testCase soloTestCase, expect *mtutil.ExpectedState, vm VersionedVMTestCase) ExpectedExecResult {
+		return setExpectationsFn(t, expect, vm)
+	}
+	d.diffTester.SetExpectations(wrappedFn)
+
+	return d
+}
+
+func (d *SimpleDiffTester) PostCheck(postStepCheckFn SimplePostStepCheckFn) *SimpleDiffTester {
+	wrappedFn := func(t require.TestingT, testCase soloTestCase, vm VersionedVMTestCase, deps *TestDependencies) {
+		postStepCheckFn(t, vm, deps)
+	}
+	d.diffTester.PostCheck(wrappedFn)
+
+	return d
+}
+
+func (d *SimpleDiffTester) Run(t *testing.T, opts ...TestOption) {
+	singleTestCase := []soloTestCase{
+		{name: "solo test case"},
+	}
+	d.diffTester.run(wrapT(t), singleTestCase, opts...)
+}
+
 type InitializeStateFn[T any] func(t require.TestingT, testCase T, state *multithreaded.State, vm VersionedVMTestCase, r *testutil.RandHelper)
 type SetExpectationsFn[T any] func(t require.TestingT, testCase T, expect *mtutil.ExpectedState, vm VersionedVMTestCase) ExpectedExecResult
 type PostStepCheckFn[T any] func(t require.TestingT, testCase T, vm VersionedVMTestCase, deps *TestDependencies)
