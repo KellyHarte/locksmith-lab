@@ -30,7 +30,6 @@ import (
 	"github.com/ethereum-optimism/optimism/op-node/rollup/interop"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/interop/indexing"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/sequencing"
-	"github.com/ethereum-optimism/optimism/op-node/rollup/status"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/sync"
 	"github.com/ethereum-optimism/optimism/op-service/client"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
@@ -136,17 +135,20 @@ func New(ctx context.Context, cfg *config.Config, log log.Logger, appVersion str
 func (n *OpNode) init(ctx context.Context, cfg *config.Config) error {
 	n.log.Info("Initializing rollup node", "version", n.appVersion)
 	n.initEventSystem()
-	if err := n.initL1(ctx, cfg); err != nil {
-		return fmt.Errorf("failed to init L1: %w", err)
-	}
 	if err := n.initL1BeaconAPI(ctx, cfg); err != nil {
 		return err
+	}
+	if err := n.initL1Source(ctx, cfg); err != nil {
+		return fmt.Errorf("failed to init L1 Source: %w", err)
 	}
 	if err := n.initL2(ctx, cfg); err != nil {
 		return fmt.Errorf("failed to init L2: %w", err)
 	}
 	if err := n.initTracer(ctx, cfg); err != nil {
 		return fmt.Errorf("failed to init the trace: %w", err)
+	}
+	if err := n.initL1Handlers(cfg); err != nil {
+		return fmt.Errorf("failed to init L1 Handlers: %w", err)
 	}
 	if err := n.initRuntimeConfig(ctx, cfg); err != nil { // depends on L2, to signal initial runtime values to
 		return fmt.Errorf("failed to init the runtime config: %w", err)
@@ -190,7 +192,7 @@ func (n *OpNode) initTracer(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
-func (n *OpNode) initL1(ctx context.Context, cfg *config.Config) error {
+func (n *OpNode) initL1Source(ctx context.Context, cfg *config.Config) error {
 	// Cache 3/2 worth of sequencing window of receipts and txs
 	defaultCacheSize := int(cfg.Rollup.SeqWindowSize) * 3 / 2
 	l1RPC, l1Cfg, err := cfg.L1.Setup(ctx, n.log, defaultCacheSize, n.metrics)
@@ -207,12 +209,26 @@ func (n *OpNode) initL1(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("failed to validate the L1 config: %w", err)
 	}
 
+	return nil
+}
+
+func (n *OpNode) initL1Handlers(cfg *config.Config) error {
+	if n.l2Driver == nil {
+		return errors.New("l2 driver must be initialized")
+	}
 	emitter := n.eventSys.Register("l1-signals", nil)
 	onL1Head := func(ctx context.Context, sig eth.L1BlockRef) {
-		emitter.Emit(ctx, status.L1UnsafeEvent{L1Unsafe: sig})
+		// TODO(#16917) Remove Event System Refactor Comments
+		//  L1UnsafeEvent fan out is updated to procedural method calls
+		if n.cfg.Tracer != nil {
+			n.cfg.Tracer.OnNewL1Head(ctx, sig)
+		}
+		n.l2Driver.L1Tracker.OnL1Unsafe(sig)
+		n.l2Driver.StatusTracker.OnL1Unsafe(sig)
+		n.l2Driver.SyncDeriver.OnL1Unsafe(ctx)
 	}
 	onL1Safe := func(ctx context.Context, sig eth.L1BlockRef) {
-		emitter.Emit(ctx, status.L1SafeEvent{L1Safe: sig})
+		n.l2Driver.StatusTracker.OnL1Safe(sig)
 	}
 	onL1Finalized := func(ctx context.Context, sig eth.L1BlockRef) {
 		emitter.Emit(ctx, finality.FinalizeL1Event{FinalizedL1: sig})
@@ -239,6 +255,7 @@ func (n *OpNode) initL1(ctx context.Context, cfg *config.Config) error {
 		cfg.L1EpochPollInterval, time.Second*10)
 	n.l1FinalizedSub = eth.PollBlockChanges(n.log, n.l1Source, onL1Finalized, eth.Finalized,
 		cfg.L1EpochPollInterval, time.Second*10)
+
 	return nil
 }
 
