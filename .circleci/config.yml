@@ -2050,6 +2050,7 @@ workflows:
           module: op-deployer
           context:
             - oplabs-gcr-release
+            - circleci-repo-readonly-authenticated-github-token
           requires:
             - contracts-bedrock-build
 
@@ -2066,9 +2067,9 @@ workflows:
           module: op-up
           context:
             - oplabs-gcr-release
+            - circleci-repo-readonly-authenticated-github-token
           requires:
             - contracts-bedrock-build
-
   release:
     when:
       not:
