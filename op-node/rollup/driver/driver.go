@@ -194,8 +194,9 @@ func NewDriver(
 	// TODO(#17115): Refactor dependency cycles
 	ec.SetCrossUpdateHandler(statusTracker)
 
-	sys.Register("engine-reset",
-		engine.NewEngineResetDeriver(driverCtx, log, cfg, l1, l2, syncCfg))
+	engineReset := engine.NewEngineResetDeriver(driverCtx, log, cfg, l1, l2, syncCfg)
+	engineReset.SetEngController(ec)
+	sys.Register("engine-reset", engineReset)
 
 	clSync := clsync.NewCLSync(log, cfg, metrics, ec) // alt-sync still uses cl-sync state to determine what to sync to
 	sys.Register("cl-sync", clSync)
@@ -213,8 +214,12 @@ func NewDriver(
 
 	derivationPipeline := derive.NewDerivationPipeline(log, cfg, depSet, verifConfDepth, l1Blobs, altDA, l2, metrics, indexingMode)
 
-	sys.Register("pipeline",
-		derive.NewPipelineDeriver(driverCtx, derivationPipeline))
+	pipelineDeriver := derive.NewPipelineDeriver(driverCtx, derivationPipeline)
+	sys.Register("pipeline", pipelineDeriver)
+
+	// Connect components that need force reset notifications to the engine controller
+	ec.SetAttributesResetter(attrHandler)
+	ec.SetPipelineResetter(pipelineDeriver)
 
 	schedDeriv := NewStepSchedulingDeriver(log)
 	sys.Register("step-scheduler", schedDeriv)
@@ -248,6 +253,10 @@ func NewDriver(
 		sequencerConfDepth := confdepth.NewConfDepth(driverCfg.SequencerConfDepth, statusTracker.L1Head, l1)
 		findL1Origin := sequencing.NewL1OriginSelector(driverCtx, log, cfg, sequencerConfDepth)
 		sys.Register("origin-selector", findL1Origin)
+
+		// Connect origin selector to the engine controller for force reset notifications
+		ec.SetOriginSelectorResetter(findL1Origin)
+
 		sequencer = sequencing.NewSequencer(driverCtx, log, cfg, attrBuilder, findL1Origin,
 			sequencerStateListener, sequencerConductor, asyncGossiper, metrics, ec)
 		sys.Register("sequencer", sequencer)
