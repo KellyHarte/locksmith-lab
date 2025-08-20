@@ -76,13 +76,6 @@ func (ev SafeDerivedEvent) String() string {
 	return "safe-derived"
 }
 
-type PendingSafeRequestEvent struct {
-}
-
-func (ev PendingSafeRequestEvent) String() string {
-	return "pending-safe-request"
-}
-
 type ProcessUnsafePayloadEvent struct {
 	Envelope *eth.ExecutionPayloadEnvelope
 }
