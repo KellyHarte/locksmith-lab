@@ -36,10 +36,20 @@ func SessionFromContext(ctx context.Context) (*Session, bool) {
 type Session struct {
 	SessionID string
 
+	// Non canonical view of the chain
+	Validated uint64
 	// Canonical view of the chain
 	CurrentState FCUState
+	// payloads
+	Payloads map[eth.PayloadID]*eth.ExecutionPayloadEnvelope
 
 	InitialState FCUState
+}
+
+func (s *Session) UpdateFCUState(latest, safe, finalized uint64) {
+	s.CurrentState.Latest = latest
+	s.CurrentState.Safe = safe
+	s.CurrentState.Finalized = finalized
 }
 
 type FCUState struct {
