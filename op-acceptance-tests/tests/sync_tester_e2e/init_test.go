@@ -1,4 +1,4 @@
-package sync_tester
+package sync_tester_e2e
 
 import (
 	"testing"
@@ -9,7 +9,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	presets.DoMain(m, presets.WithMinimalWithSyncTester(sttypes.FCUState{
+	presets.DoMain(m, presets.WithSimpleWithSyncTester(sttypes.FCUState{
 		Latest:    0,
 		Safe:      0,
 		Finalized: 0,
