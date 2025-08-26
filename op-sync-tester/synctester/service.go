@@ -21,14 +21,13 @@ import (
 	"github.com/ethereum-optimism/optimism/op-sync-tester/config"
 	"github.com/ethereum-optimism/optimism/op-sync-tester/metrics"
 	"github.com/ethereum-optimism/optimism/op-sync-tester/synctester/backend"
-	bc "github.com/ethereum-optimism/optimism/op-sync-tester/synctester/backend/config"
 
 	sttypes "github.com/ethereum-optimism/optimism/op-sync-tester/synctester/backend/types"
 )
 
 type serviceBackend interface {
 	Stop(ctx context.Context) error
-	SyncTesters() map[sttypes.SyncTesterID]bc.EntryCfg
+	SyncTesters() map[sttypes.SyncTesterID]eth.ChainID
 }
 
 var _ serviceBackend = (*backend.Backend)(nil)
@@ -216,9 +215,9 @@ func (s *Service) RPC() string {
 
 func (s *Service) NewEndpoint(chainID eth.ChainID) string {
 	uuid := uuid.New()
-	return fmt.Sprintf("%s/chain/%s/synctest/%s", s.RPC(), chainID, uuid)
+	return fmt.Sprintf("/chain/%s/synctest/%s", chainID, uuid)
 }
 
-func (s *Service) SyncTesters() map[sttypes.SyncTesterID]bc.EntryCfg {
+func (s *Service) SyncTesters() map[sttypes.SyncTesterID]eth.ChainID {
 	return s.backend.SyncTesters()
 }
