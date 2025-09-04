@@ -1,6 +1,7 @@
 package sync_tester_ext_el
 
 import (
+	"os"
 	"testing"
 
 	"github.com/ethereum-optimism/optimism/op-devstack/devtest"
@@ -11,6 +12,10 @@ import (
 
 func TestSyncTesterExtEL(gt *testing.T) {
 	t := devtest.SerialT(gt)
+
+	if os.Getenv("CIRCLECI_PIPELINE_SCHEDULE_NAME") != "build_daily" && os.Getenv("CIRCLECI_PARAMETERS_SYNC_TEST_OP_NODE_DISPATCH") != "true" {
+		t.Skip("TestSyncTesterExtEL only runs on daily scheduled pipeline jobs: %s %s", os.Getenv("CIRCLECI_PIPELINE_SCHEDULE_NAME"), os.Getenv("CIRCLECI_PARAMETERS_SYNC_TEST_OP_NODE_DISPATCH"))
+	}
 
 	sys := presets.NewMinimalExternalELWithExternalL1(t)
 	require := t.Require()
